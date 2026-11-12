@@ -1,0 +1,91 @@
+<resources>
+    <string name="app_name">DogWalk</string>
+
+    <string name="notification_channel_tracking">Walk tracking</string>
+    <string name="notification_channel_tracking_desc">Keeps your walk running while the app is in the background.</string>
+    <string name="notification_channel_proximity">Nearby dogs</string>
+    <string name="notification_channel_proximity_desc">Alerts when another walker comes within your warning distance.</string>
+    <string name="notification_channel_friend">Nearby friends</string>
+    <string name="notification_channel_friend_desc">A quieter chime for dogs yours likes.</string>
+    <string name="notification_channel_disliked">Dogs to avoid</string>
+    <string name="notification_channel_disliked_desc">A louder alarm for dogs yours does not like.</string>
+
+    <string name="tracking_title">DogWalk is tracking your walk</string>
+    <string name="tracking_text">Sharing your position with nearby walkers</string>
+
+    <string name="action_start">Start walk</string>
+    <string name="action_stop">Stop walk</string>
+    <string name="action_settings">Settings</string>
+    <string name="action_recenter">Recenter</string>
+
+    <string name="permission_rationale_title">Permissions needed</string>
+    <string name="permission_rationale_body">DogWalk needs precise location to place you on the map and to find walkers within 500 m. Notification permission lets us alert you when someone is nearby.</string>
+    <string name="permission_grant">Grant permissions</string>
+    <string name="permission_denied">Location permission is required to start a walk.</string>
+
+    <string name="settings_title">Settings</string>
+    <string name="settings_backend_url">Backend WebSocket URL</string>
+    <string name="settings_display_name">Your dog\'s name</string>
+    <string name="settings_warning_distance">Alert me within</string>
+    <string name="settings_warning_distance_value">%1$d m</string>
+    <string name="settings_warning_hint">Walkers inside this distance buzz your phone. Everyone within 500 m still shows on the map.</string>
+    <string name="settings_marked_title">Marked dogs</string>
+    <string name="settings_friends">Dogs yours likes</string>
+    <string name="settings_disliked">Dogs yours does not like</string>
+    <string name="settings_marked_empty">Tap a dog\'s name on the map to mark it.</string>
+    <string name="settings_marked_remove">Remove %1$s</string>
+    <string name="settings_save">Save</string>
+    <string name="settings_cancel">Cancel</string>
+
+    <string name="status_idle">Not walking</string>
+    <string name="status_connecting">Connecting…</string>
+    <string name="status_live">Live</string>
+    <string name="status_offline">Offline — retrying</string>
+
+    <string name="nearby_count">%1$d nearby</string>
+    <string name="proximity_title_single">%1$s is nearby</string>
+    <string name="proximity_title_many">%1$d walkers nearby</string>
+    <string name="proximity_body">%1$s is %2$d m away</string>
+    <string name="proximity_title_disliked">Watch out - %1$s is nearby</string>
+
+    <string name="auth_subtitle">Sign in so other walkers can see you, and only them.</string>
+    <string name="auth_email">Email</string>
+    <string name="auth_password">Password</string>
+    <string name="auth_sign_in">Sign in</string>
+    <string name="auth_create_account">Create account</string>
+    <string name="auth_switch_to_register">New here? Create an account</string>
+    <string name="auth_switch_to_login">Already have an account? Sign in</string>
+    <string name="auth_error_short_password">Enter an email and a password of at least 8 characters.</string>
+    <string name="auth_error_needs_invite">Enter the invite code you were sent.</string>
+    <string name="auth_invite_code">Invite code</string>
+    <string name="auth_invite_hint">Registration is invite-only for now.</string>
+    <string name="auth_error_unreachable">Cannot reach the backend. Check the URL in settings.</string>
+    <string name="auth_signed_in_as">Signed in as %1$s</string>
+    <string name="settings_sign_out">Sign out</string>
+
+    <string name="auth_forgot_password">Forgot password?</string>
+    <string name="reset_title">Reset password</string>
+    <string name="reset_body">We will email a six-digit code to the address on the account.</string>
+    <string name="reset_code">Six-digit code</string>
+    <string name="reset_new_password">New password</string>
+    <string name="reset_send_code">Send code</string>
+    <string name="reset_submit">Set new password</string>
+    <string name="reset_sent">If that address has an account, a code is on its way. It expires in 15 minutes.</string>
+    <string name="reset_done">Password changed. Sign in with the new one.</string>
+    <string name="reset_error_code">Enter the six-digit code from the email.</string>
+    <string name="reset_error_short_password">Use at least 8 characters.</string>
+    <string name="reset_close">Close</string>
+
+    <string name="settings_delete_account">Delete account</string>
+    <string name="settings_delete_account_body">This removes your account and signs out every device. It cannot be undone.</string>
+    <string name="settings_delete_account_password">Confirm your password</string>
+    <string name="settings_delete_account_confirm">Delete account</string>
+    <string name="settings_delete_account_error">Could not delete the account. Check your password and try again.</string>
+
+    <string name="mark_title">%1$s</string>
+    <string name="mark_body">How does your dog feel about this one?</string>
+    <string name="mark_friend">Likes</string>
+    <string name="mark_disliked">Does not like</string>
+    <string name="mark_clear">Not marked</string>
+    <string name="mark_cancel">Cancel</string>
+</resources>

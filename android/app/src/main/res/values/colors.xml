@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <color name="ic_launcher_background">#1B5E4B</color>
+    <color name="app_background">#FFFBF7</color>
+
+    <!-- Marker and notification accents, one per relationship. Kept here rather
+         than in Kotlin so the map layers and the notification colour cannot
+         drift apart. -->
+    <color name="marker_friend">#2E9E5B</color>
+    <color name="marker_disliked">#C62828</color>
+    <color name="marker_unknown">#E0A030</color>
+</resources>

@@ -1,0 +1,58 @@
+services:
+  redis:
+    image: redis:7-alpine
+    # AOF so accounts survive a restart. The geo index is disposable, but the
+    # user store is not.
+    command: ["redis-server", "--appendonly", "yes"]
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  backend:
+    build: .
+    # Loopback only. The app is meant to be reached through Caddy, which is what
+    # terminates TLS and sets X-Forwarded-For. Publishing 8000 on 0.0.0.0 would
+    # let anyone on the LAN skip TLS and spoof the header the rate limiter bills
+    # against. The scripts in scripts/ run on the host, so loopback is enough.
+    ports:
+      - "127.0.0.1:8000:8000"
+    environment:
+      REDIS_URL: redis://redis:6379/0
+      PROXIMITY_RADIUS_M: "500"
+      WALKER_TTL_SECONDS: "30"
+      SWEEP_INTERVAL_SECONDS: "5"
+      # Anything other than development makes the backend refuse to boot with the
+      # public development secret. See app/config.py.
+      DOGWALK_ENV: ${DOGWALK_ENV:-development}
+      # Override this in a .env file or the shell before exposing the service.
+      JWT_SECRET: ${JWT_SECRET:-dev-insecure-secret-change-me-0123456789}
+      PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}
+      # Registration needs a single-use code, minted with scripts/mint_invites.py.
+      # This is what stops /auth/register being used to ask whether an address
+      # has an account. Only turn it off once there is email verification.
+      INVITE_REQUIRED: ${INVITE_REQUIRED:-1}
+    depends_on:
+      redis:
+        condition: service_healthy
+
+  # TLS terminator. Caddy issues itself a local CA, so wss:// works without a
+  # domain. Point the app at wss://<host>:8443/ws/walk once you trust the CA.
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "8443:8443"
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy-data:/data
+    depends_on:
+      - backend
+
+volumes:
+  redis-data:
+  caddy-data:

@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+    Debug-only trust configuration.
+
+    Caddy mints its own CA for `tls internal`, so the emulator would reject
+    wss://10.0.2.2:8443 as untrusted. We bundle that CA (res/raw/caddy_root.crt)
+    and trust it here. `user` is also trusted so that if the caddy-data volume is
+    wiped and the CA is regenerated, installing the new CA on the device is
+    enough to recover without rebuilding.
+
+    Release builds inherit the main manifest, which points at no network
+    security config, so they trust only the system store.
+-->
+<network-security-config>
+    <base-config cleartextTrafficPermitted="true">
+        <trust-anchors>
+            <certificates src="system" />
+            <certificates src="user" />
+            <certificates src="@raw/caddy_root" />
+        </trust-anchors>
+    </base-config>
+</network-security-config>

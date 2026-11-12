@@ -1,0 +1,26 @@
+# Android / Gradle
+android/.gradle/
+android/build/
+android/app/build/
+android/local.properties
+android/.idea/
+android/captures/
+*.iml
+*.apk
+*.aab
+
+# Python
+backend/.venv/
+backend/__pycache__/
+backend/**/__pycache__/
+backend/.pytest_cache/
+*.pyc
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Release signing (never commit)
+android/keystore.properties
+*.jks
+*.keystore

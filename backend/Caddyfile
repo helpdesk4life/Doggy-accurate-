@@ -1,0 +1,39 @@
+{
+	# Local development TLS. `tls internal` makes Caddy mint its own CA and
+	# certificate, so wss:// works on a machine with no domain and no internet.
+	# The CA lives in the caddy-data volume; export it with:
+	#   docker compose exec caddy cat /data/caddy/pki/authorities/local/root.crt
+	# and install it on the device to make the certificate trusted.
+	auto_https disable_redirects
+	# The app connects to wss://10.0.2.2:8443, and TLS clients are required to
+	# omit SNI when the host is an IP literal (RFC 6066). With no SNI Caddy has
+	# nothing to match a certificate against, falls back to its own container
+	# address, finds no cert for it, and aborts the handshake with
+	# "alert internal error" -- which the client reports as a bare
+	# SSLHandshakeException. default_sni gives those connections a name to match.
+	default_sni 10.0.2.2
+	# DEBUG level so a failed TLS handshake is visible in `docker compose logs
+	# caddy`. At the default level Caddy drops handshake errors silently, which
+	# makes a certificate problem look like the client never connected.
+	log {
+		level DEBUG
+	}
+}
+
+# A site address needs an explicit hostname, otherwise Caddy has no name to put
+# in a certificate and every TLS handshake fails with "alert internal error".
+# localhost is for curl on the host; 10.0.2.2 is the host as seen from the
+# Android emulator, so the app can reach wss://10.0.2.2:8443/ws/walk.
+localhost:8443, 10.0.2.2:8443 {
+	tls internal
+	# Access log, so `docker compose logs caddy` shows whether a client actually
+	# reached the proxy or died in the TLS handshake.
+	log
+	reverse_proxy backend:8000 {
+		# Overwrite rather than append. Caddy's default appends to whatever the
+		# client sent, which would let a caller choose its own rate-limit bucket
+		# by sending a forged X-Forwarded-For. The backend bills the first value,
+		# so it has to be the real peer address.
+		header_up X-Forwarded-For {remote_host}
+	}
+}
