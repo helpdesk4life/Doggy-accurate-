@@ -69,6 +69,8 @@ python -m venv .venv
 | `JWT_SECRET` | dev value | Signing key for access and refresh tokens |
 | `ACCESS_TOKEN_TTL_SECONDS` | `900` | Access token lifetime |
 | `REFRESH_TOKEN_TTL_SECONDS` | `2592000` | Refresh token lifetime (30 days) |
+| `ADMIN_TOKEN_TTL_SECONDS` | `28800` | Admin session lifetime (8 hours, no refresh) |
+| `PASSWORD_CHANGE_TOKEN_TTL_SECONDS` | `900` | Lifetime of the ticket that forces a password change |
 | `PUBLIC_BASE_URL` | `http://localhost:8000` | Base URL used to build the link in a password-reset email |
 | `RATE_LIMIT_ENABLED` | `1` | Per-IP throttling on the auth endpoints |
 | `INVITE_REQUIRED` | `1` | Registration needs a single-use code |
@@ -92,7 +94,7 @@ cd backend
 .venv/Scripts/python -m pytest -q
 ```
 
-71 tests. They run against `fakeredis`, so no Redis server is needed.
+129 tests. They run against `fakeredis`, so no Redis server is needed.
 
 | File | Covers |
 | --- | --- |
@@ -102,10 +104,14 @@ cd backend
 | `test_security.py` | Password reset (send, single use, wrong code, attempt cap, no enumeration), account deletion, refresh replay grace vs. revocation, config validation, cache headers |
 | `test_ratelimit.py` | Per-address throttling, per-address isolation, health exempt, limiter can be disabled |
 | `test_invites.py` | The gate, single use, refund on a taken email, and that a taken and a free address are indistinguishable without a code |
+| `test_admin.py` | The token boundary in both directions, admin lockout, user listing and paging, account creation and the forced password change it triggers, revoke and delete, invite minting, the audit log, and that no admin response carries a position |
+| `test_admin_ui.py` | The cookie (HttpOnly, SameSite, path), redirects without one, the add-account form and its errors, the one-shot password notice, the confirmation page, the one-shot mint flash, and that no page mentions a coordinate |
 
-`scripts/e2e.py` runs 27 checks against the live stack, including token
+`scripts/e2e.py` runs 56 checks against the live stack, including token
 rejection, the full proximity cycle, the coordinate-free alert shape, the
-password-reset and account-deletion surfaces, and the invite gate.
+password-reset and account-deletion surfaces, the invite gate, the admin API's
+token boundary in both directions, and the full handed-over-password cycle —
+create, sign in, change, and the old password failing afterwards.
 
 ## Authentication
 
@@ -115,10 +121,11 @@ unreachable until you sign in.
 | Endpoint | Purpose |
 | --- | --- |
 | `POST /auth/register` | Create an account with an invite code, returns a token pair (201) |
-| `POST /auth/login` | Exchange email and password for a token pair |
+| `POST /auth/login` | Exchange email and password for a token pair, or a password-change ticket |
 | `POST /auth/refresh` | Exchange a refresh token for a new pair |
 | `POST /auth/logout` | Revoke one refresh token (204) |
 | `POST /auth/logout-all` | Revoke every refresh token for the account (204) |
+| `POST /auth/password/change` | Replace a handed-over password; returns a token pair |
 | `POST /auth/password-reset/request` | Email a 6-digit reset code (always 202) |
 | `POST /auth/password-reset/confirm` | Set a new password with a code (204) |
 | `DELETE /auth/account` | Delete the account and its data (204, needs the password) |
@@ -136,6 +143,11 @@ unreachable until you sign in.
   exists, so it cannot be used to enumerate accounts.
 - Changing or resetting a password bumps `token_version`, which invalidates every
   access token already in flight. Deleting an account also closes any live socket.
+- An account an operator created still has the password they were handed. Signing
+  in with it returns `must_change_password: true` and a `pwchange` token instead
+  of a pair. That token is a fourth `typ`, so `decode_token` refuses it everywhere
+  except `/auth/password/change` — the account cannot walk, refresh or sign out
+  until it has picked a password of its own. See the Admin section.
 - Per-IP rate limits apply to the auth endpoints (`ratelimit.py`), keyed on
   `X-Forwarded-For`, which Caddy **overwrites** rather than appends so a client
   cannot spoof its own address:
@@ -195,6 +207,109 @@ When the access token expires mid-walk the backend closes the socket with
 application code `4401`. The app exchanges its refresh token, reconnects, and
 carries on without user action. If the refresh token is dead too, the session is
 cleared and the UI falls back to the login screen.
+
+## Admin
+
+A web panel for accounts and invite codes, at `/admin/ui`. It is deliberately
+narrow: it can see who is registered, create an account, sign one out, delete
+one, and mint invite codes. It cannot see where anyone is — nothing in
+`app/routes_admin.py` or `app/admin_ui.py` reads the geo index, and
+`test_admin.py` asserts that no admin response contains a position field.
+
+### Creating an account
+
+The Accounts page has an "Add an account" form: an email, and that is it. The
+server generates a 16-character password and shows it once, on the page the form
+redirects to. Only a hash is stored, so it cannot be recovered — if the operator
+loses it before handing it over, delete the account and make another.
+
+No invite code is spent, because the code exists to gate *self*-registration by
+a stranger and an operator is not one.
+
+**The first sign-in is a password change.** Signing in with the handed-over
+password returns `must_change_password: true` and a `pwchange` token instead of
+a session. That token is a separate JWT `typ`, so every other route refuses it
+on the type check alone: the account cannot walk, refresh or sign out until it
+has picked a password of its own. `POST /auth/password/change` spends the
+ticket, sets the password, bumps `token_version` and returns a normal pair, so
+the user is signed in the moment they finish.
+
+Generating rather than choosing is the point. The operator knows this password,
+so a copy that stayed valid would not be a password, it would be a backdoor. The
+action is audited (`create_user`, with the address and the new `user_id`); the
+password never reaches the log.
+
+The same thing over the API:
+
+```bash
+curl -X POST http://127.0.0.1:8000/admin/users \
+  -H "Authorization: Bearer $ADMIN_TOKEN" \
+  -H "Content-Type: application/json" \
+  -d '{"email":"friend@example.com"}'
+```
+
+201 with `user_id`, `email`, `created_at` and `temporary_password`; 409 if the
+address is taken.
+
+### Creating an operator
+
+Admins are a separate store from walkers and are created by script, not by an
+endpoint — an endpoint that creates admins has to be protected by an admin,
+which is a bootstrapping problem.
+
+```bash
+cd backend
+.venv/Scripts/python scripts/create_admin.py --email you@example.com
+.venv/Scripts/python scripts/create_admin.py --list
+.venv/Scripts/python scripts/create_admin.py --backfill   # index pre-existing accounts
+```
+
+`--backfill` is needed once, for accounts registered before
+`dogwalk:users:created` existed. Without it those accounts do not appear in the
+list, because the list pages over that index rather than scanning the keyspace.
+
+### The boundary
+
+Admin tokens are a third JWT type (`typ: "admin"`), not a role claim on a user
+token. `decode_token` refuses a token whose type is not the one asked for, so:
+
+- a walker's access token gets 401 from every `/admin` route;
+- an admin token gets 401 from `/auth/*` and close code `4401` from `/ws/walk`.
+
+There is no refresh token for admins. The session lasts `ADMIN_TOKEN_TTL_SECONDS`
+(eight hours) and then the operator signs in again.
+
+The HTML pages authenticate with an HttpOnly, `SameSite=Strict` cookie scoped to
+`/admin`, because a browser form cannot set an `Authorization` header.
+`SameSite=Strict` is what stands in for a CSRF token here.
+
+### Endpoints
+
+| Endpoint | Purpose |
+| --- | --- |
+| `POST /admin/auth/login` | Exchange email and password for an admin token |
+| `GET /admin/users` | Accounts, newest first, `offset`/`limit` (max 100) |
+| `POST /admin/users` | Create an account with a generated password, without spending an invite code (201) |
+| `GET /admin/users/{id}` | One account, with its live session count |
+| `POST /admin/users/{id}/revoke-sessions` | Bump `token_version` and close any live socket (204) |
+| `DELETE /admin/users/{id}` | Delete the account and everything attached to it (204) |
+| `GET /admin/invites` | Unused codes, and how many have been used |
+| `POST /admin/invites` | Mint 1–50 codes (201) |
+| `GET /admin/stats` | Account and invite counts |
+| `GET /admin/audit` | Recent operator actions, newest first |
+
+Every mutating route writes to `dogwalk:admin:audit`, a capped list of 1000
+entries. Minted codes are recorded as a count, never as codes: the log is
+readable by every admin, so it must not be a second copy of the secrets it
+audits.
+
+### Serving it
+
+The panel is served by the same FastAPI process, so it is reachable wherever the
+backend is. Through Caddy that means adding the admin hostname to the site line
+in `backend/Caddyfile` — the same `default_sni` caveat as the app applies. For
+anything beyond a trusted network, put Caddy's `basic_auth` or an IP allowlist
+in front of `/admin/*` as a second gate.
 
 ## TLS
 

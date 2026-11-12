@@ -9,6 +9,8 @@ from fastapi import FastAPI, Request
 from app import config, email, geo, ratelimit
 from app.hub import Hub
 from app.proximity import refresh_neighborhood
+from app.admin_ui import router as admin_ui_router
+from app.routes_admin import router as admin_router
 from app.routes_auth import router as auth_router
 from app.ws import router as ws_router
 
@@ -99,6 +101,8 @@ def create_app(
 
     app = FastAPI(title="DogWalk proximity backend", lifespan=lifespan)
     app.include_router(auth_router)
+    app.include_router(admin_router)
+    app.include_router(admin_ui_router)
     app.include_router(ws_router)
 
     if rate_limit is None:
@@ -120,8 +124,9 @@ def create_app(
         response.headers.setdefault("X-Content-Type-Options", "nosniff")
         response.headers.setdefault("Referrer-Policy", "no-referrer")
         # Auth responses carry tokens; nothing between here and the client should
-        # keep a copy.
-        if request.url.path.startswith("/auth"):
+        # keep a copy. The admin API carries account data and invite codes, so it
+        # gets the same treatment.
+        if request.url.path.startswith(("/auth", "/admin")):
             response.headers["Cache-Control"] = "no-store"
         return response
 

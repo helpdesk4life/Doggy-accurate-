@@ -70,53 +70,92 @@ fun LoginScreen(viewModel: LoginViewModel = hiltViewModel()) {
             )
             Spacer(Modifier.height(8.dp))
             Text(
-                text = stringResource(R.string.auth_subtitle),
+                text = stringResource(
+                    if (state.changeToken != null) {
+                        R.string.auth_change_subtitle
+                    } else {
+                        R.string.auth_subtitle
+                    },
+                ),
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 textAlign = TextAlign.Center,
             )
             Spacer(Modifier.height(32.dp))
 
-            OutlinedTextField(
-                value = state.email,
-                onValueChange = viewModel::setEmail,
-                label = { Text(stringResource(R.string.auth_email)) },
-                singleLine = true,
-                enabled = !state.isBusy,
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Email,
-                    imeAction = ImeAction.Next,
-                ),
-                modifier = Modifier.fillMaxWidth(),
-            )
-            Spacer(Modifier.height(12.dp))
-            OutlinedTextField(
-                value = state.password,
-                onValueChange = viewModel::setPassword,
-                label = { Text(stringResource(R.string.auth_password)) },
-                singleLine = true,
-                enabled = !state.isBusy,
-                visualTransformation = PasswordVisualTransformation(),
-                keyboardOptions = KeyboardOptions(
-                    keyboardType = KeyboardType.Password,
-                    imeAction = if (state.isRegistering) ImeAction.Next else ImeAction.Done,
-                ),
-                modifier = Modifier.fillMaxWidth(),
-            )
-
-            // Registration is invite-gated. The field only exists in register
-            // mode, so signing in stays a two-field form.
-            if (state.isRegistering) {
-                Spacer(Modifier.height(12.dp))
+            if (state.changeToken == null) {
                 OutlinedTextField(
-                    value = state.inviteCode,
-                    onValueChange = viewModel::setInviteCode,
-                    label = { Text(stringResource(R.string.auth_invite_code)) },
-                    supportingText = { Text(stringResource(R.string.auth_invite_hint)) },
+                    value = state.email,
+                    onValueChange = viewModel::setEmail,
+                    label = { Text(stringResource(R.string.auth_email)) },
                     singleLine = true,
                     enabled = !state.isBusy,
                     keyboardOptions = KeyboardOptions(
-                        keyboardType = KeyboardType.Text,
+                        keyboardType = KeyboardType.Email,
+                        imeAction = ImeAction.Next,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = state.password,
+                    onValueChange = viewModel::setPassword,
+                    label = { Text(stringResource(R.string.auth_password)) },
+                    singleLine = true,
+                    enabled = !state.isBusy,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Password,
+                        imeAction = if (state.isRegistering) ImeAction.Next else ImeAction.Done,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+
+                // Registration is invite-gated. The field only exists in register
+                // mode, so signing in stays a two-field form.
+                if (state.isRegistering) {
+                    Spacer(Modifier.height(12.dp))
+                    OutlinedTextField(
+                        value = state.inviteCode,
+                        onValueChange = viewModel::setInviteCode,
+                        label = { Text(stringResource(R.string.auth_invite_code)) },
+                        supportingText = { Text(stringResource(R.string.auth_invite_hint)) },
+                        singleLine = true,
+                        enabled = !state.isBusy,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Text,
+                            imeAction = ImeAction.Done,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                }
+            } else {
+                // The account still has the password an operator handed it. The
+                // server issued a ticket instead of a session, so the only thing
+                // this form can do is replace it.
+                OutlinedTextField(
+                    value = state.newPassword,
+                    onValueChange = viewModel::setNewPassword,
+                    label = { Text(stringResource(R.string.auth_new_password)) },
+                    singleLine = true,
+                    enabled = !state.isBusy,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Password,
+                        imeAction = ImeAction.Next,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                Spacer(Modifier.height(12.dp))
+                OutlinedTextField(
+                    value = state.confirmPassword,
+                    onValueChange = viewModel::setConfirmPassword,
+                    label = { Text(stringResource(R.string.auth_confirm_password)) },
+                    singleLine = true,
+                    enabled = !state.isBusy,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Password,
                         imeAction = ImeAction.Done,
                     ),
                     modifier = Modifier.fillMaxWidth(),
@@ -134,7 +173,11 @@ fun LoginScreen(viewModel: LoginViewModel = hiltViewModel()) {
 
             Spacer(Modifier.height(24.dp))
             Button(
-                onClick = viewModel::submit,
+                onClick = if (state.changeToken != null) {
+                    viewModel::submitNewPassword
+                } else {
+                    viewModel::submit
+                },
                 enabled = !state.isBusy,
                 modifier = Modifier
                     .fillMaxWidth()
@@ -149,30 +192,35 @@ fun LoginScreen(viewModel: LoginViewModel = hiltViewModel()) {
                 } else {
                     Text(
                         stringResource(
-                            if (state.isRegistering) {
-                                R.string.auth_create_account
-                            } else {
-                                R.string.auth_sign_in
+                            when {
+                                state.changeToken != null -> R.string.auth_save_password
+                                state.isRegistering -> R.string.auth_create_account
+                                else -> R.string.auth_sign_in
                             },
                         ),
                     )
                 }
             }
-            Spacer(Modifier.height(8.dp))
-            TextButton(onClick = viewModel::toggleMode, enabled = !state.isBusy) {
-                Text(
-                    stringResource(
-                        if (state.isRegistering) {
-                            R.string.auth_switch_to_login
-                        } else {
-                            R.string.auth_switch_to_register
-                        },
-                    ),
-                )
-            }
-            if (!state.isRegistering) {
-                TextButton(onClick = viewModel::openReset, enabled = !state.isBusy) {
-                    Text(stringResource(R.string.auth_forgot_password))
+
+            // Neither switching to registration nor a reset makes sense while
+            // the account is mid-way through replacing a handed-over password.
+            if (state.changeToken == null) {
+                Spacer(Modifier.height(8.dp))
+                TextButton(onClick = viewModel::toggleMode, enabled = !state.isBusy) {
+                    Text(
+                        stringResource(
+                            if (state.isRegistering) {
+                                R.string.auth_switch_to_login
+                            } else {
+                                R.string.auth_switch_to_register
+                            },
+                        ),
+                    )
+                }
+                if (!state.isRegistering) {
+                    TextButton(onClick = viewModel::openReset, enabled = !state.isBusy) {
+                        Text(stringResource(R.string.auth_forgot_password))
+                    }
                 }
             }
         }
@@ -305,5 +353,6 @@ private fun errorText(error: String): String = when (error) {
     LoginViewModel.RESET_SENT -> stringResource(R.string.reset_sent)
     LoginViewModel.RESET_DONE -> stringResource(R.string.reset_done)
     LoginViewModel.RESET_BAD_CODE -> stringResource(R.string.reset_error_code)
+    LoginViewModel.PASSWORDS_DIFFER -> stringResource(R.string.auth_error_passwords_differ)
     else -> error
 }

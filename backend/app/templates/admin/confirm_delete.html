@@ -1,0 +1,16 @@
+{% extends "admin/base.html" %}
+{% block title %}Delete account · DogWalk admin{% endblock %}
+{% block content %}
+<h1>Delete account</h1>
+
+<div class="notice error">
+  <p><strong>{{ account.email }}</strong> will be removed, along with its sessions and any walk in progress.</p>
+  <p class="muted">This cannot be undone. The audit log keeps the address and the fact that it happened.</p>
+</div>
+
+<form method="post" action="/admin/ui/users/{{ account.user_id }}/delete" class="row">
+  <input type="hidden" name="offset" value="{{ offset }}">
+  <button class="danger" type="submit">Delete {{ account.email }}</button>
+  <a class="button" href="/admin/ui/users?offset={{ offset }}">Cancel</a>
+</form>
+{% endblock %}

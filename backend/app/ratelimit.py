@@ -42,6 +42,11 @@ LIMITS: dict[str, Limit] = {
     "/auth/password-reset/request": Limit(3, 3600),
     "/auth/password-reset/confirm": Limit(10, 3600),
     "/auth/account": Limit(5, 3600),
+    # Admin accounts can delete every account in the deployment, so the login is
+    # throttled like a user login rather than left open. The HTML form and the
+    # JSON endpoint are separate paths and each gets its own bucket.
+    "/admin/auth/login": Limit(10, 60),
+    "/admin/ui/login": Limit(10, 60),
 }
 
 

@@ -1,0 +1,35 @@
+{% extends "admin/base.html" %}
+{% block title %}Invites · DogWalk admin{% endblock %}
+{% block content %}
+<h1>Invites</h1>
+<p class="lede">Registration needs a single-use code. Hand one out; it stops working after the first account.</p>
+
+{% if minted %}
+<div class="notice">
+  <h2>New codes</h2>
+  <p class="mono">{{ minted | join('   ·   ') }}</p>
+</div>
+{% endif %}
+
+<form method="post" action="/admin/ui/invites" class="row">
+  <label for="count" class="muted">Mint</label>
+  <input id="count" name="count" type="number" min="1" max="50" value="1" class="field" style="width:5rem">
+  <button class="primary" type="submit">code(s)</button>
+</form>
+
+<h2>Unused ({{ codes | length }})</h2>
+{% if codes %}
+<table>
+  <thead><tr><th>Code</th></tr></thead>
+  <tbody>
+  {% for code in codes %}
+    <tr><td class="mono">{{ code }}</td></tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty">No unused codes.</p>
+{% endif %}
+
+<p class="muted" style="margin-top:1.5rem">{{ used }} code(s) used so far.</p>
+{% endblock %}

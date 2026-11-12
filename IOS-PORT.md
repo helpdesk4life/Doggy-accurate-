@@ -31,13 +31,13 @@ These are mechanical. Budget a day for the lot.
 |---|---|---|---|
 | `model/Models.kt` | 57 | `Models.swift` | Plain structs and one enum |
 | `data/remote/Protocol.kt` | 46 | `Protocol.swift` | `Codable`, `CodingKeys` for the snake_case fields |
-| `data/auth/AuthModels.kt` | 56 | `AuthModels.swift` | Request/response DTOs |
+| `data/auth/AuthModels.kt` | 89 | `AuthModels.swift` | Request/response DTOs, plus the `LoginResult` split |
 | `geo/GeoMath.kt` | 45 | `GeoMath.swift` | Same haversine destination formula, same earth radius |
-| `data/auth/AuthApi.kt` | 130 | `AuthAPI.swift` | `URLSession`, 8 endpoints |
+| `data/auth/AuthApi.kt` | 169 | `AuthAPI.swift` | `URLSession`, 9 endpoints |
 | `data/auth/AuthStore.kt` | 87 | `SessionStore.swift` | Same shape; the storage underneath changes to Keychain |
 | `data/SettingsStore.kt` | 140 | `Settings.swift` | `UserDefaults` instead of `SharedPreferences` |
-| `ui/auth/LoginScreen.kt` | 309 | `LoginScreen.swift` | SwiftUI is more concise here |
-| `ui/auth/LoginViewModel.kt` | 216 | `LoginModel.swift` | `@Observable` instead of `StateFlow` |
+| `ui/auth/LoginScreen.kt` | 358 | `LoginScreen.swift` | SwiftUI is more concise here; two steps, see below |
+| `ui/auth/LoginViewModel.kt` | 284 | `LoginModel.swift` | `@Observable` instead of `StateFlow` |
 | `ui/theme/Theme.kt` | 44 | `Theme.swift` | Same three marker colours |
 
 Two files get **deleted** rather than ported:
@@ -81,8 +81,16 @@ Close code **4401** means "token missing, expired or revoked". The client must
 refresh and reconnect, not back off. Any other close code means back off.
 
 **REST**, all under `/auth`: `register`, `login`, `refresh`, `logout`,
-`logout-all`, `password-reset/request`, `password-reset/confirm`, and
-`DELETE /account`. Registration needs an invite code.
+`logout-all`, `password/change`, `password-reset/request`,
+`password-reset/confirm`, and `DELETE /account`. Registration needs an invite
+code.
+
+`login` has two outcomes. An account an operator set up still has the password
+they were handed, and the server answers `must_change_password: true` with a
+`change_token` instead of a token pair. That token is a separate JWT `typ` and
+opens only `password/change`, so the port needs the same second step the Android
+login screen has: ask for a new password, post it with the ticket, and store the
+pair that comes back. Do not store the ticket as a session — it is not one.
 
 ## The background socket — the good news
 

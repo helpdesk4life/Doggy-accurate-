@@ -1,0 +1,27 @@
+{% extends "admin/base.html" %}
+{% block title %}Audit · DogWalk admin{% endblock %}
+{% block content %}
+<h1>Audit</h1>
+<p class="lede">The last {{ entries | length }} operator actions, newest first.</p>
+
+{% if entries %}
+<table>
+  <thead>
+    <tr><th>When</th><th>Operator</th><th>Action</th><th>Target</th><th>Detail</th></tr>
+  </thead>
+  <tbody>
+  {% for entry in entries %}
+    <tr>
+      <td class="num muted">{{ entry.ts | when }}</td>
+      <td>{{ entry.admin_email }}</td>
+      <td>{{ entry.action }}</td>
+      <td class="mono muted">{{ entry.target or '—' }}</td>
+      <td class="muted">{{ entry.detail or '' }}</td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty">Nothing recorded yet.</p>
+{% endif %}
+{% endblock %}

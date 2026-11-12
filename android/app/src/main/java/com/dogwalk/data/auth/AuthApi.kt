@@ -45,9 +45,48 @@ class AuthApi @Inject constructor(
             ),
         )
 
-    suspend fun login(email: String, password: String): TokenResponse =
-        json.decodeFromString(
+    /**
+     * Sign in. The answer is either a session or a ticket to set a password:
+     * an account an operator set up still has the password they were handed,
+     * and the server will not turn that shared secret into a session.
+     */
+    suspend fun login(email: String, password: String): LoginResult {
+        val body = json.decodeFromString<LoginResponse>(
             send("POST", "/auth/login", json.encodeToString(AuthRequest(email, password))),
+        )
+
+        val access = body.accessToken
+        val refresh = body.refreshToken
+        return if (body.mustChangePassword || access == null || refresh == null) {
+            LoginResult.MustChangePassword(
+                changeToken = body.changeToken.orEmpty(),
+                userId = body.userId,
+            )
+        } else {
+            LoginResult.SignedIn(
+                TokenResponse(
+                    accessToken = access,
+                    refreshToken = refresh,
+                    expiresIn = body.expiresIn,
+                    userId = body.userId,
+                ),
+            )
+        }
+    }
+
+    /**
+     * Replace a handed-over password. The ticket is the only credential this
+     * endpoint accepts, and it dies with the change, so the pair it returns is
+     * the session — there is no second sign-in.
+     */
+    suspend fun changePassword(changeToken: String, newPassword: String): TokenResponse =
+        json.decodeFromString(
+            send(
+                "POST",
+                "/auth/password/change",
+                json.encodeToString(ChangePasswordRequest(newPassword)),
+                accessToken = changeToken,
+            ),
         )
 
     suspend fun refresh(refreshToken: String): TokenResponse =

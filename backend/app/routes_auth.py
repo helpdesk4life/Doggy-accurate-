@@ -55,6 +55,29 @@ class TokenResponse(BaseModel):
     user_id: str
 
 
+class LoginResponse(BaseModel):
+    """Either a token pair, or a ticket to set a password.
+
+    One model rather than two endpoints: the client has already sent the
+    address and the password, and a second round trip would only send them
+    again. ``must_change_password`` is what tells the two apart, and the token
+    fields are absent in the second case rather than empty, so a client that
+    ignores the flag fails loudly instead of holding a blank session.
+    """
+
+    user_id: str
+    must_change_password: bool = False
+    access_token: str | None = None
+    refresh_token: str | None = None
+    token_type: str = "bearer"
+    expires_in: int = 0
+    change_token: str | None = None
+
+
+class ChangePasswordRequest(BaseModel):
+    new_password: str = Field(min_length=8, max_length=128)
+
+
 def _redis(request: Request):
     return request.app.state.redis
 
@@ -118,8 +141,8 @@ async def register(credentials: Credentials, request: Request) -> TokenResponse:
     return await _issue(redis, user)
 
 
-@router.post("/login", response_model=TokenResponse)
-async def login(credentials: Credentials, request: Request) -> TokenResponse:
+@router.post("/login", response_model=LoginResponse)
+async def login(credentials: Credentials, request: Request) -> LoginResponse:
     redis = _redis(request)
     try:
         user = await users.authenticate(redis, credentials.email, credentials.password)
@@ -127,7 +150,59 @@ async def login(credentials: Credentials, request: Request) -> TokenResponse:
         raise HTTPException(status_code=429, detail="too many failed attempts")
     except users.InvalidCredentials:
         raise HTTPException(status_code=401, detail="invalid email or password")
-    return await _issue(redis, user)
+
+    # An account an operator set up still has the password they were handed.
+    # Answering with a token pair would turn that shared secret into a working
+    # session, so the only thing issued here is a ticket to replace it. The
+    # ticket is a ``pwchange`` token, which every other route refuses on the
+    # type check alone — the account cannot walk, refresh or sign out until it
+    # has picked a password of its own.
+    if users.must_change_password(user):
+        token, ttl = auth.issue_password_change_token(
+            user["user_id"], int(user["token_version"])
+        )
+        return LoginResponse(
+            user_id=user["user_id"],
+            must_change_password=True,
+            change_token=token,
+            expires_in=ttl,
+        )
+
+    return LoginResponse(**(await _issue(redis, user)).model_dump())
+
+
+@router.post("/password/change", response_model=TokenResponse)
+async def change_password(body: ChangePasswordRequest, request: Request) -> TokenResponse:
+    """Replace a handed-over password with one the account chose.
+
+    Authenticated by the ``pwchange`` ticket from login, not by an access
+    token, so this is the only door open to an account in that state. On
+    success the account is signed in properly: it has just proved it knows the
+    temporary password and picked a new one, and making it type the new one
+    again would be ceremony.
+    """
+    redis = _redis(request)
+    try:
+        claims = auth.decode_token(_bearer(request), auth.PASSWORD_CHANGE)
+    except auth.InvalidToken:
+        raise HTTPException(status_code=401, detail="invalid change token")
+
+    user = await users.get_by_id(redis, claims.user_id)
+    if user is None or int(user["token_version"]) != claims.version:
+        raise HTTPException(status_code=401, detail="invalid change token")
+
+    # The point of the flow is that the operator's password stops working.
+    # Accepting it back would clear the flag without changing anything.
+    if auth.verify_password(body.new_password, user["password_hash"]):
+        raise HTTPException(
+            status_code=400, detail="choose a password different from the temporary one"
+        )
+
+    await users.set_password(redis, user["user_id"], body.new_password)
+    # Every token minted against the temporary password dies here, including
+    # the ticket that authorised this call.
+    version = await users.bump_token_version(redis, user["user_id"])
+    return await _issue(redis, {**user, "token_version": version})
 
 
 @router.post("/refresh", response_model=TokenResponse)

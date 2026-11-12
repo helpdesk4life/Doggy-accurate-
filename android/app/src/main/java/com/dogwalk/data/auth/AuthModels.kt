@@ -41,6 +41,39 @@ data class TokenResponse(
     @SerialName("user_id") val userId: String,
 )
 
+/**
+ * What `/auth/login` answers. Either a token pair, or — when the account still
+ * has the password an operator handed it — a ticket to set a real one. The
+ * token fields are nullable because the server omits them in that second case
+ * rather than sending blanks.
+ */
+@Serializable
+data class LoginResponse(
+    @SerialName("user_id") val userId: String,
+    @SerialName("must_change_password") val mustChangePassword: Boolean = false,
+    @SerialName("access_token") val accessToken: String? = null,
+    @SerialName("refresh_token") val refreshToken: String? = null,
+    @SerialName("expires_in") val expiresIn: Int = 0,
+    @SerialName("change_token") val changeToken: String? = null,
+)
+
+@Serializable
+data class ChangePasswordRequest(
+    @SerialName("new_password") val newPassword: String,
+)
+
+/** The two things a successful sign-in can mean. */
+sealed interface LoginResult {
+    data class SignedIn(val session: TokenResponse) : LoginResult
+
+    /**
+     * The account has a handed-over password. [changeToken] opens
+     * `/auth/password/change` and nothing else, so it is not a session and must
+     * not be stored as one.
+     */
+    data class MustChangePassword(val changeToken: String, val userId: String) : LoginResult
+}
+
 @Serializable
 data class ErrorResponse(
     val detail: String = "",

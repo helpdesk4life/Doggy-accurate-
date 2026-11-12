@@ -14,8 +14,10 @@ import json
 import os
 import pathlib
 import sys
+import time
 import urllib.error
 import urllib.request
+import uuid
 
 # Running as `python scripts/e2e.py` puts scripts/ on sys.path, not the backend
 # root, so `app` is not importable until the parent is added.
@@ -25,6 +27,10 @@ from app import invites  # noqa: E402
 
 DEFAULT_PASSWORD = "script-walker-password"
 DEFAULT_REDIS_URL = "redis://localhost:6379/0"
+
+# The operator the e2e run provisions for itself. Obviously not a real account.
+ADMIN_EMAIL = "e2e-operator@example.com"
+ADMIN_PASSWORD = "e2e-operator-password"
 
 
 def http_base(ws_url: str) -> str:
@@ -78,6 +84,42 @@ def mint_invite() -> str:
             code = invites.generate()
             if client.sadd(invites.UNUSED_KEY, code):
                 return invites.format_code(code)
+    finally:
+        client.close()
+
+
+def ensure_admin(email: str = ADMIN_EMAIL, password: str = ADMIN_PASSWORD) -> None:
+    """Create the e2e operator if it is not there yet.
+
+    Writes the same two keys ``app.admin.create_admin`` writes. It is duplicated
+    here rather than called because that function is async and e2e.py invokes
+    this from inside a running event loop, where ``asyncio.run`` would raise —
+    the same reason ``mint_invite`` talks to Redis directly.
+
+    There is no bootstrap endpoint for admins on purpose, so a harness that
+    needs one provisions it the way an operator would.
+    """
+    import redis
+
+    from app import admin, auth
+
+    url = os.getenv("REDIS_URL", DEFAULT_REDIS_URL)
+    client = redis.Redis.from_url(url, decode_responses=True)
+    try:
+        if client.exists(admin.ADMIN_EMAIL_KEY.format(email=email)):
+            return
+
+        admin_id = uuid.uuid4().hex
+        client.hset(
+            admin.ADMIN_KEY.format(admin_id=admin_id),
+            mapping={
+                "email": email,
+                "password_hash": auth.hash_password(password),
+                "created_at": int(time.time()),
+                "token_version": 1,
+            },
+        )
+        client.set(admin.ADMIN_EMAIL_KEY.format(email=email), admin_id)
     finally:
         client.close()
 

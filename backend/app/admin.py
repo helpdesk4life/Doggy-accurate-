@@ -1,0 +1,235 @@
+"""Operator accounts for the admin API.
+
+Admins are a separate store from walkers, and their tokens are a separate type
+(``auth.ADMIN``). That separation is the whole design: a walker's access token
+is refused by every admin route because ``decode_token`` checks ``typ``, and an
+admin token is refused by the walk socket for the same reason. There is no role
+claim to forge and no session that can be replayed across the boundary.
+
+Keys:
+
+* ``dogwalk:admins:<admin_id>``       - hash: email, password_hash, created_at, token_version
+* ``dogwalk:admins:email:<email>``    - email -> admin_id, the uniqueness index
+* ``dogwalk:admin:loginfail:<email>`` - failed login counter, for lockout
+* ``dogwalk:admin:audit``             - capped list of JSON audit entries
+
+Admins are created with ``scripts/create_admin.py`` rather than through an
+endpoint. An endpoint that creates admins has to be protected by an admin,
+which is a bootstrapping problem with no good answer at this size — and the
+existing invite script already establishes "operator actions are scripts".
+"""
+
+import json
+import time
+import uuid
+
+from app import auth, users
+
+ADMIN_KEY = "dogwalk:admins:{admin_id}"
+ADMIN_EMAIL_KEY = "dogwalk:admins:email:{email}"
+LOGIN_FAIL_KEY = "dogwalk:admin:loginfail:{email}"
+AUDIT_KEY = "dogwalk:admin:audit"
+
+# Tighter than the walker lockout. There are a handful of admin accounts and
+# each one can delete every account in the deployment, so five guesses is
+# already generous.
+MAX_LOGIN_FAILURES = 5
+LOGIN_FAILURE_WINDOW_SECONDS = 900
+
+# The audit list is capped rather than unbounded: it exists to answer "who did
+# that" for recent actions, not to be a compliance archive.
+AUDIT_MAX_ENTRIES = 1000
+
+# Verified against when the address has no admin, so that "no such admin" and
+# "wrong password" cost the same. Computed once at import.
+_DUMMY_PASSWORD_HASH = auth.hash_password("dogwalk-dummy-admin-password-not-real")
+
+
+class EmailTaken(Exception):
+    """An admin with this email already exists."""
+
+
+class InvalidCredentials(Exception):
+    """Wrong email or password. Deliberately does not say which."""
+
+
+class LockedOut(Exception):
+    """Too many failed logins for this admin; try again later."""
+
+
+def normalise_email(email: str) -> str:
+    return email.strip().lower()
+
+
+async def create_admin(redis, email: str, password: str) -> dict:
+    email = normalise_email(email)
+    if await redis.exists(ADMIN_EMAIL_KEY.format(email=email)):
+        raise EmailTaken(email)
+
+    admin_id = uuid.uuid4().hex
+    record = {
+        "email": email,
+        "password_hash": auth.hash_password(password),
+        "created_at": int(time.time()),
+        "token_version": 1,
+    }
+    async with redis.pipeline(transaction=True) as pipe:
+        pipe.hset(ADMIN_KEY.format(admin_id=admin_id), mapping=record)
+        pipe.set(ADMIN_EMAIL_KEY.format(email=email), admin_id)
+        await pipe.execute()
+
+    return {"admin_id": admin_id, **record}
+
+
+async def get_by_id(redis, admin_id: str) -> dict | None:
+    record = await redis.hgetall(ADMIN_KEY.format(admin_id=admin_id))
+    if not record:
+        return None
+    return {"admin_id": admin_id, **record}
+
+
+async def get_by_email(redis, email: str) -> dict | None:
+    admin_id = await redis.get(ADMIN_EMAIL_KEY.format(email=normalise_email(email)))
+    if admin_id is None:
+        return None
+    return await get_by_id(redis, admin_id)
+
+
+async def authenticate(redis, email: str, password: str) -> dict:
+    """Verify admin credentials, counting failures so an email cannot be guessed."""
+    email = normalise_email(email)
+    fail_key = LOGIN_FAIL_KEY.format(email=email)
+
+    failures = await redis.get(fail_key)
+    if failures is not None and int(failures) >= MAX_LOGIN_FAILURES:
+        raise LockedOut(email)
+
+    admin = await get_by_email(redis, email)
+
+    # Always run the hash, even when the address is unknown, so the two failure
+    # modes take the same time. Same reasoning as users.authenticate().
+    stored = admin["password_hash"] if admin is not None else _DUMMY_PASSWORD_HASH
+    password_ok = auth.verify_password(password, stored)
+
+    if admin is None or not password_ok:
+        count = await redis.incr(fail_key)
+        if count == 1:
+            await redis.expire(fail_key, LOGIN_FAILURE_WINDOW_SECONDS)
+        raise InvalidCredentials(email)
+
+    await redis.delete(fail_key)
+    return admin
+
+
+async def resolve_admin_token(redis, token: str) -> dict:
+    """Turn a bearer token into the admin it belongs to, or raise InvalidToken.
+
+    The type check is what keeps a walker token out: ``decode_token`` refuses
+    anything whose ``typ`` is not ``admin``, so there is no path from a stolen
+    user session to this API.
+    """
+    claims = auth.decode_token(token, auth.ADMIN)
+    admin = await get_by_id(redis, claims.user_id)
+    if admin is None:
+        raise auth.InvalidToken("unknown admin")
+    if int(admin["token_version"]) != claims.version:
+        raise auth.InvalidToken("admin token has been revoked")
+    return admin
+
+
+async def record(redis, admin: dict, action: str, target: str = "", detail: str = "") -> None:
+    """Append one audit entry.
+
+    Invite codes and passwords are never passed in here. An audit log that
+    contains the secrets it is auditing is a second copy of them.
+    """
+    entry = {
+        "ts": int(time.time()),
+        "admin_id": admin["admin_id"],
+        "admin_email": admin["email"],
+        "action": action,
+        "target": target,
+        "detail": detail,
+    }
+    async with redis.pipeline(transaction=True) as pipe:
+        pipe.lpush(AUDIT_KEY, json.dumps(entry))
+        pipe.ltrim(AUDIT_KEY, 0, AUDIT_MAX_ENTRIES - 1)
+        await pipe.execute()
+
+
+async def recent(redis, limit: int = 50) -> list[dict]:
+    """Newest first."""
+    raw = await redis.lrange(AUDIT_KEY, 0, max(limit - 1, 0))
+    entries = []
+    for item in raw:
+        if isinstance(item, bytes):
+            item = item.decode()
+        try:
+            entries.append(json.loads(item))
+        except ValueError:
+            # A truncated or hand-edited entry should not take the page down.
+            continue
+    return entries
+
+
+# The account mutations live here rather than in a route module because both the
+# JSON API and the HTML pages perform them, and a second copy is how the two
+# surfaces drift apart. The two that address an existing account return False
+# when there is no such account.
+
+
+async def create_account(redis, operator: dict, email: str) -> tuple[dict, str]:
+    """Create a walker account with a generated password. Returns ``(account, password)``.
+
+    No invite code is spent. The code exists to gate *self*-registration, where
+    the caller is a stranger who has to prove they were invited; here the caller
+    is an authenticated operator, and the audit entry is what records that the
+    account was made. Requiring a code would only mean minting one to burn it
+    immediately.
+
+    The password is generated rather than chosen, and returned exactly once —
+    only its hash goes into Redis. The account is flagged so the first sign-in
+    can do nothing but replace it. That is the whole point: the operator knows
+    this password, so a copy that stayed valid would not be a password, it would
+    be a backdoor with a nicer name. The password never reaches the audit log.
+    """
+    password = auth.generate_password()
+    account = await users.create_user(redis, email, password, must_change_password=True)
+    await record(
+        redis, operator, "create_user", target=account["user_id"], detail=account["email"]
+    )
+    return account, password
+
+
+async def revoke_sessions(redis, hub, operator: dict, user_id: str) -> bool:
+    """Sign an account out everywhere.
+
+    Bumping ``token_version`` invalidates every token already issued, but a
+    socket that is already open authenticated once and would keep running, so
+    it is closed explicitly.
+    """
+    if await users.get_by_id(redis, user_id) is None:
+        return False
+
+    await users.bump_token_version(redis, user_id)
+    if hub is not None:
+        await hub.close(user_id, code=4401, reason="sessions revoked")
+
+    await record(redis, operator, "revoke_sessions", target=user_id)
+    return True
+
+
+async def delete_account(redis, hub, operator: dict, user_id: str) -> bool:
+    account = await users.get_by_id(redis, user_id)
+    if account is None:
+        return False
+
+    if hub is not None:
+        await hub.close(user_id, code=4401, reason="account deleted")
+
+    await users.delete_user(redis, user_id)
+
+    # The address is the only part of the record that is gone afterwards, so it
+    # goes into the entry. The password hash never does.
+    await record(redis, operator, "delete_user", target=user_id, detail=account["email"])
+    return True

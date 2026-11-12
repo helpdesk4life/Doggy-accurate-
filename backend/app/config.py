@@ -39,6 +39,19 @@ class Settings:
     access_token_ttl_seconds: int = int(os.getenv("ACCESS_TOKEN_TTL_SECONDS", "900"))
     refresh_token_ttl_seconds: int = int(os.getenv("REFRESH_TOKEN_TTL_SECONDS", "2592000"))
 
+    # Admin sessions are deliberately shorter than a user's refresh token and
+    # there is no refresh flow: an operator signs in again when this expires.
+    # A stolen admin token is worth far more than a stolen walker token, and
+    # re-entering a password once a day is a cheap price for that.
+    admin_token_ttl_seconds: int = int(os.getenv("ADMIN_TOKEN_TTL_SECONDS", "28800"))
+
+    # The ticket an account gets when it still has the password an operator
+    # handed it. It opens one endpoint, so it only has to outlive the form:
+    # fifteen minutes is longer than anyone takes to type a password twice.
+    password_change_token_ttl_seconds: int = int(
+        os.getenv("PASSWORD_CHANGE_TOKEN_TTL_SECONDS", "900")
+    )
+
     # Used to build the link in a password-reset email.
     public_base_url: str = os.getenv("PUBLIC_BASE_URL", "http://localhost:8000")
 

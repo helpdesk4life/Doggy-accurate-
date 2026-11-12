@@ -9,6 +9,15 @@ Two token types are issued:
 * ``refresh`` - long lived, exchanged for a new access token. Each carries a
   ``jti`` that is tracked in Redis, so one session can be revoked on its own.
 
+Two more exist for narrower jobs, and both are separate ``typ`` values rather
+than claims on an access token:
+
+* ``admin``    - see ``ADMIN`` below.
+* ``pwchange`` - issued instead of a token pair when an account still has the
+  password an operator handed it. It opens ``/auth/password/change`` and
+  nothing else, so the account cannot walk, refresh or sign out until it has
+  picked a password of its own.
+
 Every token also carries the user's ``ver`` (token version). Bumping the stored
 version invalidates every token that user has ever been issued, which is what
 "log out everywhere" needs.
@@ -34,6 +43,17 @@ KEY_BYTES = 32
 
 ACCESS = "access"
 REFRESH = "refresh"
+
+# Admin tokens are a third type rather than a role claim on an access token.
+# A role claim would mean a stolen walker token is one edited field away from
+# operator rights; a distinct ``typ`` means the two can never be confused, and
+# ``decode_token`` already refuses a token whose type is not the one asked for.
+ADMIN = "admin"
+
+# A fourth type, for the one thing an account with a handed-over password is
+# allowed to do. Same reasoning as ADMIN: the type check in ``decode_token`` is
+# the enforcement, so no route has to remember to look at a flag.
+PASSWORD_CHANGE = "pwchange"
 
 
 class InvalidToken(Exception):
@@ -125,6 +145,36 @@ def issue_tokens(user_id: str, version: int) -> TokenPair:
         expires_in=access_ttl,
         refresh_jti=jti,
     )
+
+
+def issue_admin_token(admin_id: str, version: int) -> tuple[str, int]:
+    """A single short-lived token. No refresh pair: see ``config``."""
+    ttl = config.settings.admin_token_ttl_seconds
+    return _encode(admin_id, ADMIN, version, ttl, None), ttl
+
+
+def issue_password_change_token(user_id: str, version: int) -> tuple[str, int]:
+    """A ticket to set a password, and nothing else.
+
+    Deliberately short: it is spent in the same sitting as the sign-in that
+    produced it, and a token that only opens one endpoint has no reason to
+    outlive the form it was issued for.
+    """
+    ttl = config.settings.password_change_token_ttl_seconds
+    return _encode(user_id, PASSWORD_CHANGE, version, ttl, None), ttl
+
+
+# No I, O, 0 or 1: a handed-over password gets read aloud or copied by hand, and
+# those pairs are indistinguishable in most fonts. Sixteen characters from a
+# 32-symbol alphabet is 80 bits, which is far more than a secret that lives only
+# until the first sign-in needs.
+PASSWORD_ALPHABET = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789"
+PASSWORD_LENGTH = 16
+
+
+def generate_password() -> str:
+    """A temporary password: handed over once, replaced at first sign-in."""
+    return "".join(secrets.choice(PASSWORD_ALPHABET) for _ in range(PASSWORD_LENGTH))
 
 
 def decode_token(token: str, expected_type: str) -> Claims:

@@ -1,0 +1,73 @@
+{% extends "admin/base.html" %}
+{% block title %}Accounts · DogWalk admin{% endblock %}
+{% block content %}
+<h1>Accounts</h1>
+<p class="lede">{{ total }} registered, newest first.</p>
+
+{% if created %}
+<div class="notice">
+  <h2>Account created</h2>
+  <p class="mono">{{ created.email }} · {{ created.password }}</p>
+  <p class="muted small">
+    Shown once — only a hash is stored, so it cannot be recovered. Hand it over.
+    The first sign-in can do nothing but set a new password.
+  </p>
+</div>
+{% endif %}
+
+{% if error %}
+<div class="notice error">
+  <p><strong>Not created.</strong> {{ error }}</p>
+</div>
+{% endif %}
+
+<details class="add" {{ 'open' if error else '' }}>
+  <summary>Add an account</summary>
+  <form method="post" action="/admin/ui/users" class="stack">
+    <label for="new-email" class="muted">Email</label>
+    <input id="new-email" name="email" type="email" required value="{{ form_email }}"
+           class="field" autocomplete="off" spellcheck="false">
+    <p class="muted small">
+      The password is generated and shown once. The account must replace it at
+      first sign-in. No invite code is spent.
+    </p>
+    <button class="primary" type="submit">Create account</button>
+  </form>
+</details>
+
+{% if users %}
+<table>
+  <thead>
+    <tr><th>Email</th><th>Created</th><th>Sessions</th><th></th></tr>
+  </thead>
+  <tbody>
+  {% for user in users %}
+    <tr>
+      <td>{{ user.email }}</td>
+      <td class="num muted">{{ user.created_at | when }}</td>
+      <td class="num">{{ user.sessions }}</td>
+      <td>
+        <div class="row">
+          <form class="inline" method="post" action="/admin/ui/users/{{ user.user_id }}/revoke">
+            <input type="hidden" name="offset" value="{{ offset }}">
+            <button type="submit">Sign out</button>
+          </form>
+          <a class="button danger" href="/admin/ui/users/{{ user.user_id }}/delete?offset={{ offset }}">Delete</a>
+        </div>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty">No accounts yet.</p>
+{% endif %}
+
+{% if total %}
+<div class="pager">
+  {% if offset > 0 %}<a href="/admin/ui/users?offset={{ prev_offset }}">← Newer</a>{% endif %}
+  <span>{{ offset + 1 }}–{{ [offset + limit, total] | min }} of {{ total }}</span>
+  {% if has_next %}<a href="/admin/ui/users?offset={{ next_offset }}">Older →</a>{% endif %}
+</div>
+{% endif %}
+{% endblock %}

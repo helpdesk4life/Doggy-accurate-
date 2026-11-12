@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{% block title %}DogWalk admin{% endblock %}</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --bg: #fbfbfa; --fg: #1c1c1a; --muted: #6b6b66;
+      --line: #e3e3de; --accent: #2E9E5B; --danger: #C62828; --card: #ffffff;
+    }
+    @media (prefers-color-scheme: dark) {
+      :root { --bg: #141416; --fg: #ececea; --muted: #9a9a94; --line: #2b2b30; --card: #1c1c20; }
+    }
+    * { box-sizing: border-box; }
+    body {
+      margin: 0; background: var(--bg); color: var(--fg);
+      font: 15px/1.55 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+    }
+    header {
+      display: flex; align-items: center; gap: 1.75rem; flex-wrap: wrap;
+      padding: .85rem 1.5rem; border-bottom: 1px solid var(--line);
+    }
+    header .brand { font-weight: 600; }
+    nav { display: flex; gap: 1.15rem; }
+    nav a {
+      color: var(--muted); text-decoration: none; padding: .15rem 0;
+      border-bottom: 2px solid transparent;
+    }
+    nav a:hover { color: var(--fg); }
+    nav a.active { color: var(--fg); border-bottom-color: var(--accent); }
+    header form { margin-left: auto; }
+    main { max-width: 62rem; margin: 0 auto; padding: 2rem 1.5rem 4rem; }
+    h1 { font-size: 1.3rem; margin: 0 0 1.25rem; font-weight: 600; }
+    h2 { font-size: 1rem; margin: 2rem 0 .75rem; font-weight: 600; }
+    p.lede { color: var(--muted); margin: -.75rem 0 1.5rem; }
+    table { width: 100%; border-collapse: collapse; font-size: .925rem; }
+    th {
+      text-align: left; font-weight: 600; color: var(--muted); font-size: .78rem;
+      text-transform: uppercase; letter-spacing: .04em;
+      padding: .5rem .6rem; border-bottom: 1px solid var(--line);
+    }
+    td { padding: .6rem; border-bottom: 1px solid var(--line); vertical-align: middle; }
+    td.num { font-variant-numeric: tabular-nums; }
+    .mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: .85rem; }
+    .muted { color: var(--muted); }
+    .cards {
+      display: grid; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+      gap: 1rem; margin-bottom: 2rem;
+    }
+    .card { background: var(--card); border: 1px solid var(--line); border-radius: 10px; padding: 1rem 1.15rem; }
+    .card .value { font-size: 1.9rem; font-weight: 600; font-variant-numeric: tabular-nums; }
+    .card .label { color: var(--muted); font-size: .85rem; }
+    button {
+      font: inherit; cursor: pointer; border-radius: 7px; padding: .35rem .7rem;
+      border: 1px solid var(--line); background: var(--card); color: var(--fg);
+    }
+    button:hover { border-color: var(--muted); }
+    button.primary { background: var(--accent); border-color: var(--accent); color: #fff; }
+    button.danger { color: var(--danger); border-color: var(--danger); }
+    button.danger:hover { background: var(--danger); color: #fff; }
+    a.button {
+      display: inline-block; font: inherit; cursor: pointer; border-radius: 7px;
+      padding: .35rem .7rem; border: 1px solid var(--line);
+      background: var(--card); color: var(--fg); text-decoration: none;
+    }
+    a.button.danger { color: var(--danger); border-color: var(--danger); }
+    a.button.danger:hover { background: var(--danger); color: #fff; }
+    form.inline { display: inline; }
+    .row { display: flex; gap: .6rem; align-items: center; flex-wrap: wrap; }
+    .pager { display: flex; gap: .9rem; align-items: center; margin-top: 1rem; color: var(--muted); }
+    .pager a { color: var(--fg); }
+    .notice {
+      border: 1px solid var(--line); border-left: 3px solid var(--accent);
+      background: var(--card); border-radius: 8px; padding: .9rem 1.1rem; margin-bottom: 1.5rem;
+    }
+    .notice h2 { margin: 0 0 .5rem; }
+    .notice p { margin: .25rem 0; }
+    .error { border-left-color: var(--danger); }
+    .error strong { color: var(--danger); }
+    details.add {
+      border: 1px solid var(--line); border-radius: 8px; background: var(--card);
+      padding: .75rem 1.1rem; margin-bottom: 1.5rem;
+    }
+    details.add summary { cursor: pointer; font-weight: 600; }
+    details.add[open] summary { margin-bottom: .9rem; }
+    .stack { display: flex; flex-direction: column; gap: .35rem; max-width: 24rem; }
+    .stack label { font-size: .85rem; margin-top: .5rem; }
+    .stack button { align-self: flex-start; margin-top: .75rem; }
+    .small { font-size: .82rem; margin: .35rem 0 0; }
+    .login { max-width: 22rem; margin: 12vh auto 0; }
+    .login label { display: block; font-size: .85rem; color: var(--muted); margin: .9rem 0 .3rem; }
+    .login input, .field {
+      width: 100%; font: inherit; padding: .55rem .65rem; border-radius: 7px;
+      border: 1px solid var(--line); background: var(--card); color: var(--fg);
+    }
+    .login button { width: 100%; margin-top: 1.25rem; padding: .6rem; }
+    .empty { color: var(--muted); padding: 1.5rem 0; }
+  </style>
+</head>
+<body>
+{% if admin %}
+<header>
+  <span class="brand">DogWalk admin</span>
+  <nav>
+    <a href="/admin/ui" class="{{ 'active' if page == 'dashboard' else '' }}">Overview</a>
+    <a href="/admin/ui/users" class="{{ 'active' if page == 'users' else '' }}">Accounts</a>
+    <a href="/admin/ui/invites" class="{{ 'active' if page == 'invites' else '' }}">Invites</a>
+    <a href="/admin/ui/audit" class="{{ 'active' if page == 'audit' else '' }}">Audit</a>
+  </nav>
+  <form method="post" action="/admin/ui/logout">
+    <button type="submit">Sign out</button>
+  </form>
+</header>
+{% endif %}
+<main>
+{% block content %}{% endblock %}
+</main>
+</body>
+</html>

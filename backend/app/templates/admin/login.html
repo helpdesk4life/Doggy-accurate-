@@ -1,0 +1,15 @@
+{% extends "admin/base.html" %}
+{% block title %}Sign in · DogWalk admin{% endblock %}
+{% block content %}
+<div class="login">
+  <h1>DogWalk admin</h1>
+  {% if error %}<div class="notice error">{{ error }}</div>{% endif %}
+  <form method="post" action="/admin/ui/login">
+    <label for="email">Email</label>
+    <input id="email" name="email" type="email" autocomplete="username" required autofocus>
+    <label for="password">Password</label>
+    <input id="password" name="password" type="password" autocomplete="current-password" required>
+    <button class="primary" type="submit">Sign in</button>
+  </form>
+</div>
+{% endblock %}

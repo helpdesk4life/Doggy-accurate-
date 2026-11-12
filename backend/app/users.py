@@ -29,6 +29,10 @@ from app import auth
 USER_KEY = "dogwalk:users:{user_id}"
 EMAIL_KEY = "dogwalk:users:email:{email}"
 REFRESH_INDEX_KEY = "dogwalk:users:{user_id}:refresh"
+# Sorted set of user_id by created_at, so the admin list can page newest-first
+# without scanning the keyspace. Redis has no "list every hash" primitive that
+# is safe to call on a live store, and SCAN cannot give a stable page.
+CREATED_INDEX_KEY = "dogwalk:users:created"
 REFRESH_KEY = "dogwalk:refresh:{jti}"
 USED_REFRESH_KEY = "dogwalk:refresh:used:{jti}"
 RESET_KEY = "dogwalk:reset:{digest}"
@@ -72,24 +76,43 @@ def normalise_email(email: str) -> str:
     return email.strip().lower()
 
 
-async def create_user(redis, email: str, password: str) -> dict:
+async def create_user(
+    redis, email: str, password: str, must_change_password: bool = False
+) -> dict:
+    """Create an account.
+
+    ``must_change_password`` marks a password that somebody else chose — an
+    operator setting the account up. The flag is what makes the first sign-in
+    a password change rather than a session; see ``routes_auth.login``.
+    """
     email = normalise_email(email)
     if await redis.exists(EMAIL_KEY.format(email=email)):
         raise EmailTaken(email)
 
     user_id = uuid.uuid4().hex
+    now = time.time()
     record = {
         "email": email,
         "password_hash": auth.hash_password(password),
-        "created_at": int(time.time()),
+        "created_at": int(now),
         "token_version": 1,
     }
+    if must_change_password:
+        record["must_change_password"] = "1"
     async with redis.pipeline(transaction=True) as pipe:
         pipe.hset(USER_KEY.format(user_id=user_id), mapping=record)
         pipe.set(EMAIL_KEY.format(email=email), user_id)
+        # Float score, so two accounts created in the same second still order
+        # newest-first in the admin list. created_at stays an int for display.
+        pipe.zadd(CREATED_INDEX_KEY, {user_id: now})
         await pipe.execute()
 
     return {"user_id": user_id, **record}
+
+
+def must_change_password(user: dict) -> bool:
+    """True while the account still has the password an operator handed over."""
+    return user.get("must_change_password") == "1"
 
 
 async def get_by_id(redis, user_id: str) -> dict | None:
@@ -104,6 +127,43 @@ async def get_by_email(redis, email: str) -> dict | None:
     if user_id is None:
         return None
     return await get_by_id(redis, user_id)
+
+
+async def list_users(redis, offset: int = 0, limit: int = 50) -> list[dict]:
+    """Newest first, from the created index.
+
+    One ``ZREVRANGE`` for the page and one pipeline for the hashes, so the cost
+    is the page size rather than the number of accounts.
+    """
+    ids = await redis.zrevrange(CREATED_INDEX_KEY, offset, offset + limit - 1)
+    if not ids:
+        return []
+
+    async with redis.pipeline(transaction=False) as pipe:
+        for user_id in ids:
+            pipe.hgetall(USER_KEY.format(user_id=user_id))
+        records = await pipe.execute()
+
+    return [
+        {"user_id": user_id, **record}
+        for user_id, record in zip(ids, records)
+        if record
+    ]
+
+
+async def count_users(redis) -> int:
+    return int(await redis.zcard(CREATED_INDEX_KEY))
+
+
+async def session_counts(redis, user_ids: list[str]) -> dict[str, int]:
+    """Live refresh tokens per account: how many devices each is signed in on."""
+    if not user_ids:
+        return {}
+    async with redis.pipeline(transaction=False) as pipe:
+        for user_id in user_ids:
+            pipe.scard(REFRESH_INDEX_KEY.format(user_id=user_id))
+        counts = await pipe.execute()
+    return {user_id: int(count) for user_id, count in zip(user_ids, counts)}
 
 
 async def authenticate(redis, email: str, password: str) -> dict:
@@ -134,11 +194,19 @@ async def authenticate(redis, email: str, password: str) -> dict:
 
 
 async def set_password(redis, user_id: str, password: str) -> None:
-    await redis.hset(
-        USER_KEY.format(user_id=user_id),
-        "password_hash",
-        auth.hash_password(password),
-    )
+    """Replace the password and clear the handed-over flag.
+
+    Both callers — the reset flow and the forced change — are the account
+    choosing its own password, which is exactly what the flag is waiting for.
+    Clearing it here rather than at each call site means a reset is also a way
+    out of the forced-change flow, which is the escape hatch if the operator
+    never passes the temporary password on.
+    """
+    key = USER_KEY.format(user_id=user_id)
+    async with redis.pipeline(transaction=True) as pipe:
+        pipe.hset(key, "password_hash", auth.hash_password(password))
+        pipe.hdel(key, "must_change_password")
+        await pipe.execute()
 
 
 async def delete_user(redis, user_id: str) -> None:
@@ -163,6 +231,7 @@ async def delete_user(redis, user_id: str) -> None:
         pipe.delete(EMAIL_KEY.format(email=user["email"]))
         pipe.delete(LOGIN_FAIL_KEY.format(email=user["email"]))
         pipe.delete(RESET_ATTEMPT_KEY.format(email=user["email"]))
+        pipe.zrem(CREATED_INDEX_KEY, user_id)
         await pipe.execute()
 
 

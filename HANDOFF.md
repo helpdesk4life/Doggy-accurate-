@@ -1,9 +1,13 @@
 # Handoff — DogWalk
 
-State captured at the end of the iOS background-strategy session (2026-11-12).
-Read this first when picking the project back up. For what to build next, see
+State captured at the end of the admin-panel session (2026-11-12). Read this
+first when picking the project back up. For what to build next, see
 `ROADMAP.md`; for the iOS plan in full, `IOS-PORT.md`; for the iOS code that
 exists, `ios/README.md`.
+
+**Nothing is committed.** The working tree holds the whole admin panel plus the
+generated-password flow, uncommitted, on top of `7d26413 Eerste versie`. See
+**Uncommitted work** at the bottom before you start anything else.
 
 ## What this project is
 
@@ -23,8 +27,15 @@ rebooted, see **Resuming** instead.
 | `backend-backend-1` | Up, `127.0.0.1:8000` (loopback only) |
 | `backend-redis-1` | Up (healthy), `0.0.0.0:6379`, AOF on, `redis-data` volume |
 | `backend-caddy-1` | Up, `0.0.0.0:8443`, `caddy-data` volume |
-| Emulator `emulator-5554` | Running, AVD `Medium_Phone_API_37.0` |
-| App | Installed, signed in as `fresh@example.com`, dog `Pickle` |
+| Admin panel | Up at `/admin/ui`, operator `operator@example.com` / `operator-password` |
+| Emulator | **Not running.** Start it before any Android work. |
+| App | Last installed build signed in as `fresh@example.com`, dog `Pickle` |
+
+Redis holds 8 accounts, 46 unused invites and 27 used ones. One account,
+`tokke@test.be`, was created through the panel and **has never completed its
+first sign-in** — `must_change_password` is still `1` and its generated password
+was shown once and is gone. Delete and recreate it, or use the reset flow, before
+trying to sign in as it.
 
 Accounts live in Redis under `dogwalk:users:*`, so they survive a stack restart
 now that Redis has a volume. The geo index is disposable and is rebuilt from the
@@ -46,6 +57,21 @@ curl -sk https://localhost:8443/health      # through Caddy
 ```
 
 Expected: `{"status":"ok","radius_m":500.0,"walker_ttl_seconds":30.0}`
+
+Then the admin panel, which needs no build step and no Node:
+
+```bash
+start http://127.0.0.1:8000/admin/ui          # or https://localhost:8443/admin/ui
+```
+
+Sign in as `operator@example.com` / `operator-password`. That operator is a dev
+account in Redis; recreate it with `scripts/create_admin.py` if the volume was
+wiped.
+
+**The backend has no bind mount and no `--reload`.** The image is built from the
+source, so a Python or template edit needs `docker compose up -d --build`, not a
+restart. That is the single most common way to spend ten minutes debugging a
+change that never reached the container.
 
 Android side:
 
@@ -224,7 +250,8 @@ raise the cost; they do not remove it.
 Marking a dog as liked or disliked is stored in `SharedPreferences` under
 `marked_dogs` and **never sent to the server**. The backend has no concept of a
 relationship, so the social graph cannot leak from Redis even if the store were
-dumped. The whole feature is Android-only; `pytest -q` stayed at 71 passed.
+dumped. The whole feature is Android-only; `pytest -q` stayed at 71 passed
+(then — 129 now).
 
 Where it lives:
 
@@ -360,6 +387,99 @@ adb shell run-as com.dogwalk cat /data/data/com.dogwalk/shared_prefs/dogwalk_aut
 Every value should read `iv:ciphertext` base64. If you can see a JWT or an email
 address in there, something regressed.
 
+## Admin panel — accounts and invites, nothing else
+
+A server-rendered web panel at `/admin/ui`, plus a JSON API at `/admin/*` that
+does the same things. It can list accounts, create one, sign one out, delete one,
+mint invite codes, and show an audit log.
+
+**It cannot see where anyone is.** That is a hard scope constraint, not an
+oversight: no route in `app/routes_admin.py` or `app/admin_ui.py` reads
+`dogwalk:walkers:geo`, and both test files assert that no admin response and no
+rendered page contains `lat`, `lon`, `latitude`, `longitude`, `bearing`,
+`bearing_deg`, `distance_m` or `accuracy`. If you add a feature here, keep that
+assertion passing — it is the thing that stops the panel quietly becoming a
+surveillance tool.
+
+### Why server-rendered Jinja
+
+The repo has no Node toolchain and no JS build step; it is Android plus Python.
+Adding a React admin would have meant a second package manager, a second build,
+and a second thing to keep working. Jinja templates in `app/templates/admin/`
+render in the same FastAPI process, so the panel ships with the backend and
+there is nothing to compile.
+
+### The four decisions worth not undoing
+
+1. **Admin is its own JWT `typ`, not a role claim.** `decode_token` refuses a
+   token whose type is not the one asked for, so the boundary is enforced by the
+   decoder rather than by a check each route has to remember. A walker token gets
+   401 from every `/admin` route; an admin token gets 401 from `/auth/*` and
+   close code `4401` from `/ws/walk`. Both directions are tested.
+2. **The HTML pages use a cookie, the API uses a bearer token.** A browser form
+   cannot set an `Authorization` header. The cookie is HttpOnly, `SameSite=Strict`
+   and scoped to `/admin`; `SameSite=Strict` is what stands in for a CSRF token.
+   There is no refresh token for admins — the session is
+   `ADMIN_TOKEN_TTL_SECONDS` (8 h) and then you sign in again.
+3. **Admins are created by script, never by an endpoint.** An endpoint that
+   creates admins must itself be protected by an admin, which is a bootstrapping
+   problem. `scripts/create_admin.py` is the only way in.
+4. **The audit log records counts, never secrets.** Minted codes are logged as a
+   number, not as codes; account creation logs the address and the new `user_id`,
+   never the password. The log is readable by every admin, so it must not become
+   a second copy of the things it audits.
+
+### Generated passwords and the forced change
+
+Creating an account takes an email and nothing else. The server generates a
+16-character password from `PASSWORD_ALPHABET` (no `I`, `O`, `0`, `1` — 80 bits),
+shows it once on the page the form redirects to, and stores only a hash.
+
+The account is created with `must_change_password: "1"`. Login then answers
+`must_change_password: true` with a **`pwchange` token** and `access_token` /
+`refresh_token` **absent rather than empty**, so a client that ignores the flag
+fails loudly instead of holding a blank session. `POST /auth/password/change`
+spends the ticket, sets the password, bumps `token_version` and returns a normal
+pair — the user is signed in the moment they finish.
+
+Three consequences to keep in mind:
+
+- **The operator cannot recover the password.** Only a hash is stored. If it is
+  lost before handover, delete the account and make another. The reset flow also
+  works as an escape hatch, because `users.set_password` clears the flag.
+- **Changing to the same password is refused (400).** Accepting it back would
+  clear the flag without changing anything.
+- **The Android client had to change.** `AuthApi.login` decoded into a fixed
+  `TokenResponse`, so the new response shape would have thrown a
+  `SerializationException`. It now returns a `LoginResult` sealed interface
+  (`SignedIn` / `MustChangePassword`), which keeps `AuthStore` untouched and
+  means the ticket is never stored as a session. `LoginScreen` is a two-step
+  form.
+
+### Code map
+
+| File | Role |
+| --- | --- |
+| `app/admin.py` | The store: operators, account creation, listing, revoke, delete, invites, audit. No HTTP. |
+| `app/routes_admin.py` | The JSON API and `require_admin`. |
+| `app/admin_ui.py` | The HTML pages, the cookie, and the one-shot flash. |
+| `app/templates/admin/` | `base`, `login`, `dashboard`, `users`, `invites`, `audit`, `confirm_delete`. |
+| `scripts/create_admin.py` | `--email`, `--list`, `--backfill`. |
+
+### Two things that will cost you time
+
+**The flash is a Redis key, not a session cookie.** `_flash_put` / `_flash_take`
+store a JSON object under a random id with a 120 s TTL, and the redirect carries
+the id in the query string. That is how the generated password survives exactly
+one page load and then is gone. It replaced an invites-only list format, so both
+the password notice and the minted-codes notice now go through the same two
+helpers — do not add a third mechanism.
+
+**`--backfill` is needed once.** The account list pages over
+`dogwalk:users:created`, not a keyspace scan. Accounts registered before that
+index existed do not appear until you run
+`scripts/create_admin.py --backfill`.
+
 ## TLS
 
 `wss://` terminates at Caddy, which mints its own local CA with `tls internal`.
@@ -440,9 +560,25 @@ cd /c/Users/thoma/Downloads/dog/backend
 # Hand someone an invite code
 ./.venv/Scripts/python.exe scripts/mint_invites.py
 ./.venv/Scripts/python.exe scripts/mint_invites.py --list
+
+# Create an operator for the admin panel at /admin/ui
+./.venv/Scripts/python.exe scripts/create_admin.py --email you@example.com
+./.venv/Scripts/python.exe scripts/create_admin.py --list
 ```
 
-`pytest -q` → **71 passed**. `scripts/e2e.py` → **27/27 passed**.
+Accounts can also be created from the panel itself: the Accounts page has an
+"Add an account" form, and `POST /admin/users` does the same over the API. No
+invite code is spent — the code gates self-registration by a stranger, and an
+operator is not one.
+
+The password is generated (16 characters, shown once) and the account must
+replace it at first sign-in: login answers `must_change_password` with a
+`pwchange` token instead of a session, and that token opens only
+`/auth/password/change`. The Android login screen has a second step for it. If
+the operator loses the password before handing it over, delete the account and
+make another — only a hash is stored.
+
+`pytest -q` → **129 passed**. `scripts/e2e.py` → **56/56 passed**.
 
 | Test file | Covers |
 | --- | --- |
@@ -452,12 +588,17 @@ cd /c/Users/thoma/Downloads/dog/backend
 | `test_security.py` | Password reset (send, single use, wrong code, attempt cap, no enumeration), account deletion, refresh replay grace vs. revocation, config validation, cache headers |
 | `test_ratelimit.py` | Per-address throttling, per-address isolation, health exempt, limiter can be disabled |
 | `test_invites.py` | The gate, single use, refund on a taken email, and that a taken and a free address are indistinguishable without a code |
+| `test_admin.py` | The admin/walker token boundary in both directions, admin lockout, user listing and paging, account creation and the forced password change it triggers, revoke and delete, invite minting, the audit log, and that no admin response carries a position |
+| `test_admin_ui.py` | The admin cookie (HttpOnly, SameSite, path), redirects without one, the add-account form and its errors, the one-shot password notice, the delete confirmation page, the one-shot mint flash, and that no page mentions a coordinate |
 
 `scripts/e2e.py` covers token rejection (missing and malformed), welcome frames,
 bidirectional alerts at 100 m, name propagation, clear at 800 m, re-entry
 re-firing, coordinate validation, malformed JSON rejection, the 30 s TTL sweep,
 the coordinate-free alert shape (no `lat`/`lon`, bearing 0/180), the
-password-reset and account-deletion surfaces, and the invite gate. It uses
+password-reset and account-deletion surfaces, the invite gate, and the admin
+API — login, the token boundary in both directions, listing, creating an account
+(and that it spends no invite code), minting, revoking, deleting, and that the
+audit log holds no codes and no passwords. It uses
 Rotterdam as its reference point on purpose — see the comment at the top of the
 file.
 
@@ -476,10 +617,24 @@ throwaway account derived from `--email`.
 
 - `docker compose up -d --build` builds and runs clean; Redis healthcheck gates
   the backend start.
-- `pytest -q` → 71 passed.
-- `scripts/e2e.py` → 27/27 passed against real Redis.
+- `pytest -q` → 129 passed.
+- `scripts/e2e.py` → 56/56 passed against real Redis.
 - `https://localhost:8443/health` → 200 through Caddy, with a certificate issued
   by the local CA for both `localhost` and `10.0.2.2`.
+- **The handed-over-password cycle, live on `:8000`**: created an account from the
+  panel → password shown once → refresh shows nothing → login returns
+  `must_change_password: True` with `access_token: None` → the `pwchange` ticket
+  is refused by `/auth/logout-all` (401) → `POST /auth/password/change` 200 with a
+  real session → the old password 401 → the new password 200 with
+  `must_change_password: False` → cleanup 204.
+- **The same through Caddy TLS** (`https://localhost:8443`): 303 → notice reading
+  `tls-temp3@example.com · 5VH3NHWM8T7PMQRL` → refresh shows nothing.
+- **The panel renders and the boundary holds**: `/admin/ui` without a cookie
+  redirects to the login page; the cookie is HttpOnly, `SameSite=Strict`, path
+  `/admin`; a walker token gets 401 from every `/admin` route and an admin token
+  gets 401 from `/auth/*`.
+- **No admin surface carries a position**: asserted over every JSON response and
+  every rendered page, not just the ones that look likely.
 - **Fresh install over TLS**: cleared app data, registered a new account through
   Caddy (`POST /auth/register 201`), started a walk, and the socket connected
   over `wss://10.0.2.2:8443` with the default URL. Walker id in
@@ -545,7 +700,7 @@ throwaway account derived from `--email`.
   - `marked_dogs` in `shared_prefs/dogwalk_settings.xml` round-trips as
     `[{"id":"…","name":"Buddy","relationship":"FRIEND"}]` and survives a restart.
     Nothing about it is sent to the server — the backend was not touched and
-    `pytest -q` is still 71 passed.
+    `pytest -q` was still 71 passed at the time.
 
 ## Three bugs fixed, worth not reintroducing
 
@@ -592,6 +747,20 @@ the user was locked out until they killed the app. `onSuccess` now sets
   mint codes one at a time.
 - `LoggingEmailSender` writes reset codes to the backend log. Fine for a dev box,
   not for anything shared — swap in a real sender before the first non-LAN user.
+- **The admin panel has no second gate.** It is protected by the operator password
+  and nothing else. For anything beyond a trusted network, put Caddy's
+  `basic_auth` or an IP allowlist in front of `/admin/*`. The lockout is tighter
+  than the walker one on purpose — 5 failures in 15 minutes, because a handful of
+  operator accounts can each delete every account in the deployment — but there is
+  no password-change flow for operators, so `scripts/create_admin.py` is the only
+  way to set one.
+- **A generated password is unrecoverable by design.** If the operator loses it
+  before handover, the account must be deleted and recreated. Worth a "copy"
+  button on the notice if this ever gets used by someone other than you.
+- **The panel cannot edit an account**, only create, revoke and delete. Changing
+  an email or a dog name is not possible from the UI.
+- **No pagination on the audit page** — it shows the newest 100 of a 1000-entry
+  capped list.
 - `default_sni` holds a single value, so the local TLS setup works for one
   IP-or-hostname at a time.
 - The backend is single-instance; the hub lives in process memory. See
@@ -617,6 +786,17 @@ the user was locked out until they killed the app. `onSuccess` now sets
 - Gradle 9.5.1, AGP 8.13.0, Kotlin 2.2.20, KSP 2.2.20-2.0.4, Hilt 2.57,
   Compose BOM 2025.09.00, MapLibre 12.0.0, OkHttp 4.12
 - Backend venv: `backend/.venv/Scripts/python.exe`
+- `ruff` is installed in that venv for linting only, and is deliberately **not**
+  in `requirements.txt`. Run it as
+  `.venv/Scripts/python.exe -m ruff check --select F,E9 app/ tests/ scripts/`.
+- **`curl -X POST -L` re-sends the POST to the redirect target and drops the
+  body.** Testing the panel's form handlers with `-L` silently does the wrong
+  thing. Use `-D -` to read the `Location` header, then GET it.
+- **A cookie set on `localhost` is not sent to `127.0.0.1`.** They are different
+  hosts to a cookie jar, so a jar captured through Caddy on `localhost:8443`
+  authenticates nothing against `127.0.0.1:8000`. The failure looks like a
+  redirect to the login page, which reads like a broken session rather than a
+  missing cookie.
 - `export MSYS_NO_PATHCONV=1` is required for `adb` device paths **and**
   `docker compose exec` container paths in Git Bash
 - Emulator reference point is the Amsterdam Dam: `adb emu geo fix 4.8952 52.3702`
@@ -648,3 +828,48 @@ the user was locked out until they killed the app. `onSuccess` now sets
 - `adb shell pm clear com.dogwalk` resets the dog name to a new random one. If you
   clear app data during a test, set the name back to `Pickle` in settings before
   finishing, or the docs stop matching the device.
+
+## Uncommitted work
+
+**Nothing has been committed.** The tree sits on `7d26413 Eerste versie` with the
+whole admin panel and the generated-password flow uncommitted — several sessions
+of work in one diff. Commit it before starting anything new; a `git stash` or a
+bad `checkout` loses all of it.
+
+New files:
+
+```
+backend/app/admin.py
+backend/app/admin_ui.py
+backend/app/routes_admin.py
+backend/app/templates/admin/          (7 templates)
+backend/scripts/create_admin.py
+backend/tests/test_admin.py
+backend/tests/test_admin_ui.py
+```
+
+Modified: `backend/app/{auth,config,main,ratelimit,routes_auth,users}.py`,
+`backend/scripts/{_auth,e2e}.py`, `backend/requirements*.txt`, the four Android
+auth files plus `strings.xml`, and `README.md` / `ROADMAP.md` / `HANDOFF.md` /
+`IOS-PORT.md`.
+
+A suggested split, if you want the history to be readable rather than one lump:
+
+1. `backend/app/admin.py` + `routes_admin.py` + `create_admin.py` +
+   `test_admin.py` + the `main.py` wiring — the API and the token boundary.
+2. `admin_ui.py` + `templates/` + `test_admin_ui.py` — the panel.
+3. `auth.py` / `users.py` / `routes_auth.py` / `config.py` + the Android auth
+   files — generated passwords and the forced change.
+
+Only the third split is self-contained; the first two share `admin.py`, so take
+them in order. The counts in `README.md` and `ROADMAP.md` (129 tests, 56 e2e
+checks) describe the final state, so land the docs last.
+
+Before committing, re-run the two gates:
+
+```bash
+cd /c/Users/thoma/Downloads/dog/backend
+.venv/Scripts/python.exe -m pytest -q                    # expect 129 passed
+.venv/Scripts/python.exe scripts/e2e.py                  # expect 56/56
+.venv/Scripts/python.exe -m ruff check --select F,E9 app/ tests/ scripts/
+```

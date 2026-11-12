@@ -5,6 +5,7 @@ import androidx.lifecycle.viewModelScope
 import com.dogwalk.data.auth.AuthApi
 import com.dogwalk.data.auth.AuthException
 import com.dogwalk.data.auth.AuthStore
+import com.dogwalk.data.auth.LoginResult
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -19,6 +20,14 @@ data class LoginUiState(
     val isRegistering: Boolean = false,
     val isBusy: Boolean = false,
     val error: String? = null,
+    /**
+     * Set when the account still has the password an operator handed it. While
+     * this is non-null the form asks for a new password instead of a sign-in,
+     * and the ticket is the only credential the server will accept.
+     */
+    val changeToken: String? = null,
+    val newPassword: String = "",
+    val confirmPassword: String = "",
 )
 
 /**
@@ -93,19 +102,77 @@ class LoginViewModel @Inject constructor(
                 }
             }
 
-            result.onSuccess { session ->
+            result.onSuccess { outcome ->
                 // This ViewModel is activity-scoped, so it outlives the screen.
                 // Clear the spinner before saving: otherwise signing out brings
                 // the form back disabled, with no way to submit it again. Drop
                 // the password too, so it is not held for the app's lifetime.
                 _state.value = _state.value.copy(isBusy = false, password = "")
-                authStore.save(session, email)
+                when (outcome) {
+                    is LoginResult.SignedIn -> authStore.save(outcome.session, email)
+                    // Not a session. The account has to pick a password first,
+                    // and the ticket it got is good for nothing else.
+                    is LoginResult.MustChangePassword -> _state.value = _state.value.copy(
+                        changeToken = outcome.changeToken,
+                        newPassword = "",
+                        confirmPassword = "",
+                    )
+                }
             }.onFailure { error ->
                 _state.value = _state.value.copy(
                     isBusy = false,
                     error = (error as? AuthException)?.message ?: UNREACHABLE,
                 )
             }
+        }
+    }
+
+    // --- first sign-in on a handed-over password ---------------------------
+
+    fun setNewPassword(value: String) {
+        _state.value = _state.value.copy(newPassword = value, error = null)
+    }
+
+    fun setConfirmPassword(value: String) {
+        _state.value = _state.value.copy(confirmPassword = value, error = null)
+    }
+
+    /**
+     * Spend the ticket from login on a password of the account's own. The pair
+     * that comes back is a real session, so there is nothing left to sign in to.
+     */
+    fun submitNewPassword() {
+        val current = _state.value
+        if (current.isBusy) return
+        val ticket = current.changeToken ?: return
+
+        if (current.newPassword.length < MIN_PASSWORD_LENGTH) {
+            _state.value = current.copy(error = SHORT_PASSWORD)
+            return
+        }
+        if (current.newPassword != current.confirmPassword) {
+            _state.value = current.copy(error = PASSWORDS_DIFFER)
+            return
+        }
+
+        _state.value = current.copy(isBusy = true, error = null)
+        viewModelScope.launch {
+            runCatching { authApi.changePassword(ticket, current.newPassword) }
+                .onSuccess { session ->
+                    _state.value = _state.value.copy(
+                        isBusy = false,
+                        newPassword = "",
+                        confirmPassword = "",
+                        changeToken = null,
+                    )
+                    authStore.save(session, _state.value.email.trim())
+                }
+                .onFailure { error ->
+                    _state.value = _state.value.copy(
+                        isBusy = false,
+                        error = (error as? AuthException)?.message ?: UNREACHABLE,
+                    )
+                }
         }
     }
 
@@ -212,5 +279,6 @@ class LoginViewModel @Inject constructor(
         const val RESET_SENT = "reset-sent"
         const val RESET_DONE = "reset-done"
         const val RESET_BAD_CODE = "reset-bad-code"
+        const val PASSWORDS_DIFFER = "passwords-differ"
     }
 }

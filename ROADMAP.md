@@ -3,7 +3,7 @@
 What to build next, in priority order. `HANDOFF.md` covers how to get the stack
 running and what is already verified; this file is the forward-looking half.
 
-Last updated at the end of the friend-groups session.
+Last updated at the end of the admin-panel session.
 
 ## Start here tomorrow
 
@@ -13,16 +13,23 @@ cd /c/Users/thoma/Downloads/dog/backend
 docker compose up -d --build
 curl -s http://127.0.0.1:8000/health
 
-# 2. Emulator, then the app
+# 2. The admin panel needs no build — just open it
+start http://127.0.0.1:8000/admin/ui     # operator@example.com / operator-password
+
+# 3. Emulator, then the app
 cd /c/Users/thoma/Downloads/dog/android
 export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
 ./gradlew :app:installDebug
 
-# 3. Confirm nothing regressed
+# 4. Confirm nothing regressed
 cd /c/Users/thoma/Downloads/dog/backend
-./.venv/Scripts/python.exe -m pytest -q          # expect 71 passed
-./.venv/Scripts/python.exe scripts/e2e.py        # expect 27/27
+./.venv/Scripts/python.exe -m pytest -q          # expect 129 passed
+./.venv/Scripts/python.exe scripts/e2e.py        # expect 56/56
 ```
+
+**Nothing is committed yet** — the admin panel and the generated-password flow
+are sitting in the working tree. See **Uncommitted work** in `HANDOFF.md` before
+you start anything else.
 
 The app is signed in as `fresh@example.com` / `hunter2hunter2` with dog `Pickle`.
 `emma@example.com` also uses `hunter2hunter2`. `buddy@example.com` was created by
@@ -158,6 +165,49 @@ amber → neutral channel, green → `dogwalk_proximity_friend`, red →
 `dogwalk_proximity_disliked` with `alarm_alert`, remove → back to amber and the
 neutral channel. Marker colours checked by sampling screenshot pixels, not by eye.
 
+## P1.6 — admin backend, done
+
+A web panel at `/admin/ui` for accounts and invite codes, plus a JSON API under
+`/admin`. Scope was held to user and invite management on purpose: no live
+monitoring, and nothing that reads the geo index.
+
+**Decision: admin tokens are a third JWT type, not a role claim.** A `role` field
+on a walker's access token would mean a stolen walker token is one edited claim
+away from operator rights. `typ: "admin"` means `decode_token` refuses it in both
+directions and there is no claim to forge. `test_admin.py` asserts both
+directions, including that an admin token is closed with `4401` on the walk
+socket.
+
+**Decision: the account list pages over an index, not a scan.** `SCAN` cannot
+give a stable page and gets slower as the keyspace grows, so registration now
+`ZADD`s to `dogwalk:users:created` with a float score — two accounts created in
+the same second still order correctly. Accounts registered before this change
+need `scripts/create_admin.py --backfill` once.
+
+**Decision: no JavaScript.** The pages are server-rendered Jinja with form posts
+and 303 redirects. The repository has no Node toolchain, and a React build step
+would be the largest new dependency in the project for five screens. Minted codes
+come back through a short-lived Redis key rather than a query string, because a
+query string lands in the proxy access log and those are secrets.
+
+Two new runtime dependencies: `jinja2`, and `python-multipart` (which FastAPI
+requires for form posts). Test count went from 71 to 109.
+
+**Added later: creating accounts from the panel.** The Accounts page has an
+"Add an account" form, and `POST /admin/users` does the same over the API. No
+invite code is spent: the code gates self-registration by a stranger, and an
+operator is not one. Test count went from 109 to 123.
+
+**Then: generated passwords and a forced change.** The operator no longer picks
+the password — the server generates 16 characters and shows them once. Signing
+in with it returns `must_change_password` and a `pwchange` token instead of a
+session; that token is a fourth JWT `typ`, so `decode_token` refuses it
+everywhere except `/auth/password/change`. The account cannot walk, refresh or
+sign out until it has chosen its own password. The alternative — trusting the
+client to show a change screen — would have left the handed-over password
+working, which defeats the point of generating one. Test count went from 123 to
+129; the Android client grew a second step on the login screen to match.
+
 ## Deferred — deliberately, per the friends-and-family scope
 
 These are the two P1 items we chose not to do. They are not forgotten; they are
@@ -188,7 +238,7 @@ deploy mid-evening annoys someone.
 ## P2 — quality, before or shortly after launch
 
 - **Zero Android tests.** No `test/` or `androidTest/` directory at all. The
-  backend has 57 tests; the client has none. The highest-value first tests are
+  backend has 129 tests; the client has none. The highest-value first tests are
   `WalkSocketClient` reconnect/refresh behaviour and `AuthStore` state transitions
   — the `isBusy` bug fixed this session would have been caught by one.
 - **No CI.** No `.github/`. `pytest` and `assembleDebug` are cheap enough to run
