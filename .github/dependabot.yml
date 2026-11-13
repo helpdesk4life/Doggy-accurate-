@@ -1,0 +1,12 @@
+version: 2
+
+updates:
+  # The workflow pins action majors (checkout@v7, setup-java@v6, ...). Those
+  # majors move and eventually get deprecated, so let Dependabot bump them
+  # rather than discovering it when a run breaks.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: ci

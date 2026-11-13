@@ -1,0 +1,128 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+# A force-push or a burst of commits should not leave three runs racing for the
+# same Gradle cache entry. Cancel the superseded ones.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Backend tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          # Matches backend/Dockerfile. Testing the interpreter that ships is the
+          # point: a developer on a newer Python still gets caught here.
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements-dev.txt
+
+      # No Redis service. The tests inject fakeredis, so the suite is pure CPU
+      # and finishes in seconds. The e2e job below is what exercises real Redis.
+      - name: Run pytest
+        working-directory: backend
+        run: python -m pytest -q
+
+  android:
+    name: Android tests and lint
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-java@v6
+        with:
+          distribution: temurin
+          # compileOptions and jvmTarget are both 17 in app/build.gradle.kts.
+          java-version: "17"
+
+      - uses: android-actions/setup-android@v4
+        with:
+          # compileSdk is 36. The runner image ships an SDK, but which platforms
+          # it carries changes between image versions, so ask for them by name.
+          packages: "platforms;android-36 build-tools;36.0.0"
+
+      - uses: gradle/actions/setup-gradle@v6
+
+      # One Gradle invocation so the Kotlin compile is shared between the two
+      # tasks. --continue keeps lint running when a test fails, so a red run
+      # still reports both rather than hiding the second problem behind the first.
+      - name: Run unit tests and lint
+        working-directory: android
+        run: ./gradlew :app:testDebugUnitTest :app:lintDebug --continue --console=plain
+
+      - name: Upload reports
+        if: failure()
+        uses: actions/upload-artifact@v7
+        with:
+          name: android-reports
+          path: |
+            android/app/build/reports/tests/
+            android/app/build/reports/lint-results-debug.html
+          if-no-files-found: ignore
+
+  e2e:
+    name: End-to-end against real Redis
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v7
+
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: backend/requirements-dev.txt
+
+      - name: Install dependencies
+        working-directory: backend
+        run: pip install -r requirements-dev.txt
+
+      # The scripts mint their own invite codes straight into Redis, so the gate
+      # stays on and the run needs no seeded data.
+      - name: Start the stack
+        working-directory: backend
+        run: docker compose up -d --build
+
+      # `docker compose up -d` returns as soon as the containers are created, so
+      # poll the health endpoint rather than assuming uvicorn is listening.
+      - name: Wait for the backend
+        working-directory: backend
+        run: |
+          for attempt in $(seq 1 60); do
+            if curl -sf http://127.0.0.1:8000/health > /dev/null; then
+              echo "backend healthy after ${attempt} attempt(s)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::error::backend did not become healthy within 120s"
+          docker compose logs --no-color
+          exit 1
+
+      - name: Run the end-to-end suite
+        working-directory: backend
+        run: python scripts/e2e.py
+
+      - name: Dump container logs
+        if: failure()
+        working-directory: backend
+        run: docker compose logs --no-color

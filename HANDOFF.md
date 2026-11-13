@@ -569,6 +569,9 @@ cd /c/Users/thoma/Downloads/dog/backend
 cd /c/Users/thoma/Downloads/dog/android
 export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
 ./gradlew :app:testDebugUnitTest
+
+# Static analysis — a gate in CI, so run it before pushing
+./gradlew :app:lintDebug
 ```
 
 Accounts can also be created from the panel itself: the Accounts page has an
@@ -584,7 +587,8 @@ the operator loses the password before handing it over, delete the account and
 make another — only a hash is stored.
 
 `pytest -q` → **129 passed**. `scripts/e2e.py` → **56/56 passed**.
-`./gradlew :app:testDebugUnitTest` → **19 passed**.
+`./gradlew :app:testDebugUnitTest` → **19 passed**. `./gradlew :app:lintDebug` →
+**0 errors**, 45 warnings.
 
 | Test file | Covers |
 | --- | --- |
@@ -750,6 +754,58 @@ Four things about the setup that will cost time if undone:
 
 `backoffMillis()` is `internal` rather than private so the ladder can be asserted
 directly; driving it through the socket would mean waiting real seconds per rung.
+
+## CI
+
+`.github/workflows/ci.yml` runs three jobs on every push to `main` and every pull
+request. Each runs the same command as **Verification commands** above, so a green
+run means what a green local run means.
+
+| Job | Runs | Needs |
+| --- | --- | --- |
+| `backend` | `pytest -q` on Python 3.12 | Nothing — the tests inject fakeredis |
+| `android` | `:app:testDebugUnitTest :app:lintDebug` on JDK 17 | Android SDK 36, installed by the job |
+| `e2e` | `scripts/e2e.py` | `docker compose up -d --build`, then a health poll |
+
+Python 3.12 is deliberate: it is what `backend/Dockerfile` ships, so CI tests the
+interpreter that runs in production rather than the 3.14 on this machine.
+
+The two Gradle tasks share one invocation so the Kotlin compile happens once, and
+`--continue` keeps lint running when a test fails — otherwise the first failure
+hides the second.
+
+**Lint is a gate, not a report.** Turning it on found one real thing:
+`NotificationHelper.notifyProximity` calls `NotificationManager.notify` without a
+permission check lint can see. The check is there — `canPostNotifications()` three
+lines above — but lint's dataflow does not cross a private method, so the call
+carries `@SuppressLint("MissingPermission")` with the reason in the KDoc. Keep the
+guard and the annotation honest if you add another notification path.
+
+The workflow was checked with `actionlint` 1.7.12, with `shellcheck` 0.11.0 on
+`PATH` so the `run:` blocks are linted too — clean. `actionlint` does not verify
+that an action tag exists, so the pinned majors were confirmed separately with
+`git ls-remote --tags`: `checkout@v7`, `setup-python@v7`, `setup-java@v6`,
+`setup-android@v4`, `setup-gradle@v6`, `upload-artifact@v7`.
+
+### Where it runs
+
+`origin` is a self-hosted Gitea (28.3.0) at `192.168.3.70:3000`, not GitHub. Gitea
+Actions reads `.github/workflows/` and takes the same syntax, so the file is the
+same either way — but two things have to be true on that box before a run appears:
+
+1. **A runner is registered.** `act_runner` has to be installed and joined to the
+   instance. Without one, a push queues nothing and the Actions tab stays empty.
+   The instance reports zero workflow runs so far, which is consistent with either
+   no runner or no workflow ever having been pushed.
+2. **The runner can reach Docker.** The `e2e` job runs `docker compose` on the
+   host, so the runner container needs `/var/run/docker.sock` mounted, or a
+   Docker-in-Docker sidecar. The `backend` and `android` jobs need nothing special.
+   If the runner cannot do this, delete the `e2e` job — the other two still cover
+   the unit suites, and `scripts/e2e.py` stays runnable by hand.
+
+`.github/dependabot.yml` bumps the action majors weekly. They move: `checkout` went
+v5 → v7 while this project has existed, and a deprecated major fails the run rather
+than warning.
 
 ## Three bugs fixed, worth not reintroducing
 

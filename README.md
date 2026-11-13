@@ -113,6 +113,10 @@ password-reset and account-deletion surfaces, the invite gate, the admin API's
 token boundary in both directions, and the full handed-over-password cycle —
 create, sign in, change, and the old password failing afterwards.
 
+`.github/workflows/ci.yml` runs all of it on every push: `pytest`, the Android
+unit tests, `lintDebug`, and `scripts/e2e.py` against real Redis. See **CI** in
+`HANDOFF.md` for what the runner needs.
+
 ## Authentication
 
 There is no anonymous mode. The app opens on a login screen and the map is

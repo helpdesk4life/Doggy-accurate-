@@ -242,8 +242,10 @@ deploy mid-evening annoys someone.
   concrete `SettingsStore`, which needs a `Context`, so that class has to go
   behind an interface first. `NotificationHelper` and the Compose UI have no
   tests at all.
-- **No CI.** No `.github/`. `pytest` and `assembleDebug` are cheap enough to run
-  on every push.
+- **CI has never actually run.** `.github/workflows/ci.yml` exists and every job's
+  command was run by hand, but `origin` is a self-hosted Gitea and no runner has
+  picked up a job yet. See **CI → Where it runs** in `HANDOFF.md` for the two
+  things that have to be true on that box.
 - **Reconnect backoff is untested.** The client backs off 1 s → 30 s, but nobody
   has run it against a backend that stays down for minutes. Worth a manual pass
   and then a test.
@@ -283,14 +285,15 @@ deploy mid-evening annoys someone.
 
 ## Suggested next session
 
-The first Android tests are in: 19 of them, covering `WalkSocketClient` and
-`AuthStore`. The next step is **CI** (P2) — `pytest` and `testDebugUnitTest` are
-both cheap and there is still no `.github/`, so nothing runs them automatically.
+CI is in. `.github/workflows/ci.yml` runs `pytest`, `testDebugUnitTest` and
+`lintDebug`, and `scripts/e2e.py` against real Redis. Turning lint on found and
+fixed one real error. The open question is the runner — see **CI → Where it runs**
+in `HANDOFF.md`.
 
-After that, **`WalkRepository` tests** are the highest-value remaining coverage.
-It holds the proximity and session-renewal logic, and the notification-withdrawal
-fix from this session is exactly the kind of thing a test would pin down. It needs
-`SettingsStore` behind an interface first, because that class takes a `Context`.
+**`WalkRepository` tests** are now the highest-value remaining coverage. It holds
+the proximity and session-renewal logic, and the notification-withdrawal fix is
+exactly the kind of thing a test would pin down. It needs `SettingsStore` behind
+an interface first, because that class takes a `Context`.
 
 If you would rather build something visible, **block a specific walker** (P3) is
 the natural sequel to friend groups: the marking UI and the settings list already

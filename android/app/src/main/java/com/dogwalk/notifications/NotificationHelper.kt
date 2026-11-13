@@ -1,6 +1,7 @@
 package com.dogwalk.notifications
 
 import android.Manifest
+import android.annotation.SuppressLint
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -124,7 +125,12 @@ class NotificationHelper @Inject constructor(
      * a dog yours does not like matters more than one it does, and a stranger
      * matters more than a friend. Otherwise a friend arriving would replace the
      * warning with a chime, which is the wrong way round.
+     *
+     * The POST_NOTIFICATIONS check is [canPostNotifications] below. Lint's
+     * dataflow does not cross a private method, so the suppression is for the
+     * analyser rather than for a missing guard.
      */
+    @SuppressLint("MissingPermission")
     fun notifyProximity(walkers: List<NearbyWalker>, marked: Map<String, MarkedDog>) {
         if (walkers.isEmpty()) return
         if (!canPostNotifications()) return
