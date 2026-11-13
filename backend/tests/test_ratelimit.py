@@ -39,7 +39,7 @@ def login(client, index: int, address: str | None = None):
     )
 
 
-def test_login_is_throttled_per_address(client):
+def test_login_is_throttled_per_address(client, frozen_window):
     limit = ratelimit.LIMITS["/auth/login"]
 
     for index in range(limit.requests):
@@ -51,7 +51,7 @@ def test_login_is_throttled_per_address(client):
     assert int(blocked.headers["retry-after"]) > 0
 
 
-def test_register_is_throttled(client):
+def test_register_is_throttled(client, frozen_window):
     limit = ratelimit.LIMITS["/auth/register"]
 
     for index in range(limit.requests):
@@ -93,3 +93,21 @@ def test_the_limiter_can_be_switched_off(redis_client):
         limit = ratelimit.LIMITS["/auth/login"]
         for index in range(limit.requests + 5):
             assert login(client, index).status_code == 401
+
+
+def test_a_window_boundary_resets_the_counter(client, frozen_window):
+    """Pins the fixed-window tradeoff that the tests above have to work around.
+
+    A burst that straddles the boundary gets a second window's worth. That is why
+    the limiter is described as blunting automated abuse rather than metering
+    traffic, and why every test that counts requests pins the clock.
+    """
+    limit = ratelimit.LIMITS["/auth/login"]
+
+    for index in range(limit.requests):
+        assert login(client, index).status_code == 401
+    assert login(client, limit.requests).status_code == 429
+
+    frozen_window.advance(limit.window_seconds)
+
+    assert login(client, limit.requests + 1).status_code == 401

@@ -600,8 +600,15 @@ def limited_client(redis_client):
         yield test_client
 
 
-def test_admin_login_is_rate_limited(limited_client, operator):
-    """The limiter answers with Retry-After; the per-email lockout does not."""
+def test_admin_login_is_rate_limited(limited_client, operator, frozen_window):
+    """The limiter answers with Retry-After; the per-email lockout does not.
+
+    ``frozen_window`` is load-bearing. The lockout trips at 5 failures and the
+    limiter at 10, so this only sees the limiter if all eleven requests land in
+    one window. Let the boundary fall between the tenth and the eleventh and the
+    counter resets, the request is allowed through, and the lockout answers
+    instead — a 429 with no ``Retry-After``.
+    """
     limit = ratelimit.LIMITS["/admin/auth/login"]
 
     for _ in range(limit.requests):

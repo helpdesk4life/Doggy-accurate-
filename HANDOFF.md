@@ -809,7 +809,7 @@ and what the server clones from. Push to both, or drop `origin`.
 v5 → v7 while this project has existed, and a deprecated major fails the run rather
 than warning.
 
-## Three bugs fixed, worth not reintroducing
+## Bugs fixed, worth not reintroducing
 
 **OkHttp `onClosing` must acknowledge the close.** OkHttp only calls `onClosed`
 once *both* peers have sent a close frame. When the server closes first, the
@@ -830,6 +830,24 @@ survives sign-out. `submit()` set `isBusy = true` and only reset it on failure, 
 after signing out the login form came back permanently disabled with a spinner —
 the user was locked out until they killed the app. `onSuccess` now sets
 `isBusy = false` and clears `password` (so it is not held for the app's lifetime).
+
+**The rate-limit tests were a coin flip.** `app/ratelimit.py` buckets on
+`int(time.time()) // window_seconds`, so its counters reset on a wall-clock
+boundary. Every test that sends exactly `limit.requests + 1` requests therefore
+fails whenever the boundary falls between the last allowed request and the one
+that should be blocked — the counter restarts at zero and the request goes
+through. `test_admin_login_is_rate_limited` was the first to lose that toss, on
+`697aa50`, a docs-only commit: the 429 came back as the per-email lockout
+(`{"detail":"too many failed attempts"}`, 37 bytes) instead of the limiter
+(`{"detail":"too many requests"}`, 30 bytes, with `Retry-After`).
+
+The behaviour is correct — a fixed window is documented as coarse, and a burst
+straddling a boundary gets two windows' worth. The tests were wrong to assume
+otherwise. `tests/conftest.py` now provides `frozen_window`, which replaces
+`ratelimit.time` with a clock that only moves when a test calls `.advance()`.
+Any new test that counts requests against a limit must take that fixture.
+`test_a_window_boundary_resets_the_counter` pins the tradeoff itself, so the
+next person meets it as a passing test rather than a mystery failure.
 `MapViewModel.deleteAccount()` had the same latent flaw and got the same fix.
 
 ## Known gaps
