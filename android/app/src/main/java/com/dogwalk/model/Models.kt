@@ -24,6 +24,21 @@ data class NearbyWalker(
     val distanceMeters: Double,
 )
 
+/**
+ * What just happened to the set of walkers inside the warning distance.
+ *
+ * One flow rather than an arrival flow plus a separate clear flow: the alert
+ * occupies a single notification slot, so a withdrawal that overtook the arrival
+ * replacing it would silently swallow a real alert.
+ */
+sealed interface ProximityEvent {
+    /** Walkers that just came inside the warning distance. */
+    data class Arrived(val walkers: List<NearbyWalker>) : ProximityEvent
+
+    /** The last walker inside the warning distance left, so the alert is stale. */
+    data object Cleared : ProximityEvent
+}
+
 enum class ConnectionState {
     DISCONNECTED,
     CONNECTING,

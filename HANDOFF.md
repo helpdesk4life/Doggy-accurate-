@@ -701,6 +701,16 @@ throwaway account derived from `--email`.
     `[{"id":"…","name":"Buddy","relationship":"FRIEND"}]` and survives a restart.
     Nothing about it is sent to the server — the backend was not touched and
     `pytest -q` was still 71 passed at the time.
+- **The proximity alert is withdrawn when the last walker leaves the warning
+  distance**, on `emulator-5554` with a scratch script that moved one walker on a
+  single socket (a disconnect would have sent `PROXIMITY_CLEAR` and exercised a
+  different path). Holding at 60 m: notification `id=2001` present on
+  `dogwalk_proximity`, header `1 nearby`. Moved to 300 m — outside the 100 m
+  warning distance but inside the 500 m server radius: notification gone, header
+  still `1 nearby`, which is the proof the withdrawal came from the warning-distance
+  path and not from the walker leaving the radius. Back to 60 m: notification
+  returned, so re-entry still alerts. Stopping the walk cleared both `2001` and
+  the foreground `1001`.
 
 ## Three bugs fixed, worth not reintroducing
 
@@ -731,8 +741,12 @@ the user was locked out until they killed the app. `onSuccess` now sets
   safety net; two of the three bugs above would have been caught by one test each.
 - No reconnect backoff tuning — the client reconnects, but the retry cadence has
   not been stress-tested against a backend that stays down.
-- The proximity notification is not cancelled when the walker leaves the radius;
-  it sits in the shade until tapped or dismissed (`setAutoCancel(true)`).
+- **The proximity alert is withdrawn when the last walker leaves the warning
+  distance, but not when one of several leaves.** The notification names the most
+  urgent walker in the set, so if a disliked dog walks away while a friend stays,
+  it keeps naming the dog that left. Fixing that means re-posting the content
+  without re-sounding it, and `setOnlyAlertOnce(true)` cannot do it here — it
+  would also silence the arrival that the urgency ordering depends on.
 - **Friend groups do not survive a reinstall or a `pm clear`.** They are
   `SharedPreferences` only, with no backup (`allowBackup="false"`). That is the
   price of keeping the social graph off the server, and it is the right trade for

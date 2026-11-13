@@ -9,6 +9,7 @@ import com.dogwalk.data.remote.WalkSocketClient
 import com.dogwalk.di.ApplicationScope
 import com.dogwalk.model.ConnectionState
 import com.dogwalk.model.NearbyWalker
+import com.dogwalk.model.ProximityEvent
 import com.dogwalk.model.WalkerLocation
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Job
@@ -50,9 +51,12 @@ class WalkRepository @Inject constructor(
     private val _radiusMeters = MutableStateFlow(DEFAULT_RADIUS_METERS)
     val radiusMeters: StateFlow<Double> = _radiusMeters.asStateFlow()
 
-    /** Emits only when a non-empty proximity set arrives, so the service can alert once per event. */
-    private val _proximityEvents = MutableSharedFlow<List<NearbyWalker>>(extraBufferCapacity = 16)
-    val proximityEvents: SharedFlow<List<NearbyWalker>> = _proximityEvents.asSharedFlow()
+    /**
+     * Emits when walkers arrive inside the warning distance, and when the last one
+     * leaves so the service can withdraw the alert it posted.
+     */
+    private val _proximityEvents = MutableSharedFlow<ProximityEvent>(extraBufferCapacity = 16)
+    val proximityEvents: SharedFlow<ProximityEvent> = _proximityEvents.asSharedFlow()
 
     val connection: StateFlow<ConnectionState> = socket.state
 
@@ -159,14 +163,24 @@ class WalkRepository @Inject constructor(
                     // else appeared, which is especially wrong now that the sound
                     // depends on who it is.
                     val arrived = withinWarning.filter { it.id !in alertedIds }
+                    val emptied = ids.isEmpty() && alertedIds.isNotEmpty()
                     alertedIds = ids
-                    if (arrived.isNotEmpty()) _proximityEvents.tryEmit(arrived)
+                    when {
+                        arrived.isNotEmpty() ->
+                            _proximityEvents.tryEmit(ProximityEvent.Arrived(arrived))
+
+                        // The last one left. Withdraw the alert rather than leave it
+                        // in the shade claiming a dog is nearby when it is not.
+                        emptied -> _proximityEvents.tryEmit(ProximityEvent.Cleared)
+                    }
                 }
             }
 
             FrameTypes.PROXIMITY_CLEAR -> {
                 _nearby.value = emptyList()
+                val wasAlerting = alertedIds.isNotEmpty()
                 alertedIds = emptySet()
+                if (wasAlerting) _proximityEvents.tryEmit(ProximityEvent.Cleared)
             }
 
             FrameTypes.WELCOME -> frame.radiusMeters?.let { _radiusMeters.value = it }

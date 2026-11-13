@@ -14,6 +14,7 @@ import com.dogwalk.data.SettingsStore
 import com.dogwalk.data.auth.AuthState
 import com.dogwalk.data.auth.AuthStore
 import com.dogwalk.data.repository.WalkRepository
+import com.dogwalk.model.ProximityEvent
 import com.dogwalk.model.WalkerLocation
 import com.dogwalk.notifications.NotificationHelper
 import com.google.android.gms.location.FusedLocationProviderClient
@@ -105,6 +106,10 @@ class LocationTrackingService : LifecycleService() {
             updatesRunning = false
         }
         repository.stopTracking()
+        // The walk is over, so an alert about a dog that was nearby is stale. The
+        // collector above is already cancelled by this point, which is why this is
+        // explicit rather than another ProximityEvent.
+        notifications.cancelProximity()
         super.onDestroy()
     }
 
@@ -145,10 +150,15 @@ class LocationTrackingService : LifecycleService() {
     private fun observeProximity() {
         if (alertJob != null) return
         alertJob = lifecycleScope.launch {
-            repository.proximityEvents.collect { walkers ->
-                // Read the marks at alert time rather than caching them, so a dog
-                // marked mid-walk changes the sound on the very next alert.
-                notifications.notifyProximity(walkers, settings.markedDogs.value)
+            repository.proximityEvents.collect { event ->
+                when (event) {
+                    is ProximityEvent.Arrived ->
+                        // Read the marks at alert time rather than caching them, so a
+                        // dog marked mid-walk changes the sound on the very next alert.
+                        notifications.notifyProximity(event.walkers, settings.markedDogs.value)
+
+                    ProximityEvent.Cleared -> notifications.cancelProximity()
+                }
             }
         }
     }

@@ -245,9 +245,12 @@ deploy mid-evening annoys someone.
 - **Reconnect backoff is untested.** The client backs off 1 s → 30 s, but nobody
   has run it against a backend that stays down for minutes. Worth a manual pass
   and then a test.
-- **Proximity notification is never cancelled.** When a walker leaves the radius
-  the notification stays in the shade until tapped. `setAutoCancel(true)` only
-  handles the tap case.
+- **The proximity alert goes stale when one of several walkers leaves.** It is
+  withdrawn correctly once the last one is outside the warning distance, but if a
+  disliked dog walks away while a friend stays, the notification keeps naming the
+  dog that left. Re-posting the content without re-sounding it needs a path that
+  `setOnlyAlertOnce(true)` cannot provide, because that would also silence the
+  arrival the urgency ordering depends on.
 - **Battery.** `PRIORITY_HIGH_ACCURACY` every 5 s for the length of a walk is
   heavy. Consider `BALANCED` when the walker is stationary, or a longer interval
   once the first fix lands.

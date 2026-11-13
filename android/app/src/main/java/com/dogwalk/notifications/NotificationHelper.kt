@@ -164,6 +164,17 @@ class NotificationHelper @Inject constructor(
         runCatching { manager.notify(PROXIMITY_NOTIFICATION_ID, notification) }
     }
 
+    /**
+     * Withdraw the proximity alert.
+     *
+     * [notifyProximity] posts into a single notification slot, so this is the only
+     * way an alert goes away without the user tapping it — `setAutoCancel(true)`
+     * covers the tap and nothing else.
+     */
+    fun cancelProximity() {
+        runCatching { manager.cancel(PROXIMITY_NOTIFICATION_ID) }
+    }
+
     private fun canPostNotifications(): Boolean =
         Build.VERSION.SDK_INT < Build.VERSION_CODES.TIRAMISU ||
             ContextCompat.checkSelfPermission(
