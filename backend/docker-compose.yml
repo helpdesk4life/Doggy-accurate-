@@ -41,6 +41,13 @@ services:
       # This is what stops /auth/register being used to ask whether an address
       # has an account. Only turn it off once there is email verification.
       INVITE_REQUIRED: ${INVITE_REQUIRED:-1}
+      # A .env file only feeds ${...} interpolation in this file; anything the
+      # backend must actually see has to be forwarded here explicitly. Without
+      # these two, a production .env per deploy/VPS.md refuses to boot: the
+      # validator refuses EMAIL_SENDER=logging unless it can see the
+      # acknowledgement below.
+      EMAIL_SENDER: ${EMAIL_SENDER:-logging}
+      ALLOW_LOGGING_EMAIL: ${ALLOW_LOGGING_EMAIL:-0}
     depends_on:
       redis:
         condition: service_healthy
