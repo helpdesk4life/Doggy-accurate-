@@ -1,11 +1,11 @@
 package com.dogwalk.data.repository
 
-import com.dogwalk.data.SettingsStore
-import com.dogwalk.data.auth.AuthApi
+import com.dogwalk.data.WalkSettings
 import com.dogwalk.data.auth.AuthStore
+import com.dogwalk.data.auth.TokenRefresher
 import com.dogwalk.data.remote.FrameTypes
 import com.dogwalk.data.remote.ServerFrame
-import com.dogwalk.data.remote.WalkSocketClient
+import com.dogwalk.data.remote.WalkTransport
 import com.dogwalk.di.ApplicationScope
 import com.dogwalk.model.ConnectionState
 import com.dogwalk.model.NearbyWalker
@@ -33,10 +33,10 @@ import javax.inject.Singleton
  */
 @Singleton
 class WalkRepository @Inject constructor(
-    private val socket: WalkSocketClient,
-    private val settings: SettingsStore,
+    private val socket: WalkTransport,
+    private val settings: WalkSettings,
     private val authStore: AuthStore,
-    private val authApi: AuthApi,
+    private val authApi: TokenRefresher,
     @param:ApplicationScope private val scope: CoroutineScope,
 ) {
     private val _isTracking = MutableStateFlow(false)

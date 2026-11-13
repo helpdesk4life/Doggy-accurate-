@@ -587,7 +587,7 @@ the operator loses the password before handing it over, delete the account and
 make another — only a hash is stored.
 
 `pytest -q` → **129 passed**. `scripts/e2e.py` → **56/56 passed**.
-`./gradlew :app:testDebugUnitTest` → **19 passed**. `./gradlew :app:lintDebug` →
+`./gradlew :app:testDebugUnitTest` → **29 passed**. `./gradlew :app:lintDebug` →
 **0 errors**, 45 warnings.
 
 | Test file | Covers |
@@ -724,16 +724,17 @@ throwaway account derived from `--email`.
 
 ## Android tests
 
-19 JVM tests in `android/app/src/test/`, run with
+29 JVM tests in `android/app/src/test/`, run with
 `./gradlew :app:testDebugUnitTest`. No emulator, no backend, no Robolectric.
 
 | File | Covers |
 | --- | --- |
 | `data/auth/AuthStoreTest.kt` | The sign-in state machine: save, updateTokens, clear, and the three restore cases |
+| `data/repository/WalkRepositoryTest.kt` | Proximity bookkeeping (arrival once, not per fix; withdrawal on the last leaving and on a clear frame) and the three session-renewal branches |
 | `data/remote/WalkSocketClientTest.kt` | Connect, bearer header, name query parameter, frame decoding, 4401, reconnect, disconnect, the backoff ladder |
 | `testing/InMemorySecureStore.kt` | Shared fake, not a test |
 
-Four things about the setup that will cost time if undone:
+Six things about the setup that will cost time if undone:
 
 1. **`SecureStore` exists so `AuthStore` can be built on the JVM.** `SecurePrefs`
    needs the Android Keystore, which does not exist off-device. `AuthStore` takes
@@ -751,6 +752,21 @@ Four things about the setup that will cost time if undone:
    go idle and throws `Gave up waiting for queue to shut down` if a socket is left
    half-open. That failure surfaces in `tearDown`, so it reads like a broken test
    rather than a broken fake.
+5. **`WalkRepository` depends on three interfaces, not the concrete classes.**
+   `WalkSettings` (the settings the walk reads), `WalkTransport` (what
+   `WalkSocketClient` implements) and `TokenRefresher` (the one auth call the
+   repository makes, split out of `AuthApi`) — each bound to the real class in
+   `AppModule` with a one-line `@Provides`, so production wiring is unchanged and
+   the repository runs on the JVM. Adding a dependency to the repository means
+   deciding which seam it belongs behind.
+6. **The repository test gives the session a scope of its own.** On the
+   `TestScope` itself the collectors block `runTest` from ever finishing (each
+   test burns its whole timeout); on `backgroundScope` they only run while the
+   test body happens to suspend, so a frame emitted directly is silently
+   dropped. The `session {}` helper builds the repository a supervisor on the
+   test's own scheduler, cancelled in `finally`, and the fake transport enqueues
+   its emissions behind the collectors — queue order, not timing, decides who
+   sees what.
 
 `backoffMillis()` is `internal` rather than private so the ladder can be asserted
 directly; driving it through the socket would mean waiting real seconds per rung.
@@ -852,13 +868,12 @@ next person meets it as a passing test rather than a mystery failure.
 
 ## Known gaps
 
-- **The Android tests cover the transport and the session, not the rest.** 19
-  tests: `WalkSocketClient` (connect, bearer header, frame decoding, 4401,
-  reconnect, the backoff ladder) and `AuthStore` (the sign-in state machine).
-  `WalkRepository`, `SettingsStore`, `NotificationHelper` and the Compose UI have
-  none. `WalkRepository` is the next one worth doing — it holds the proximity
-  logic — but it needs `SettingsStore` behind an interface first, because that
-  class takes a `Context`.
+- **The Android tests cover the transport, the session and the auth store, not
+  the rest.** 29 tests: `WalkSocketClient` (connect, bearer header, frame
+  decoding, 4401, reconnect, the backoff ladder), `WalkRepository` (proximity
+  bookkeeping and the session-renewal branches) and `AuthStore` (the sign-in
+  state machine). `SettingsStore`, `NotificationHelper` and the Compose UI have
+  none.
 - No reconnect backoff tuning — the client reconnects, but the retry cadence has
   not been stress-tested against a backend that stays down.
 - **The proximity alert is withdrawn when the last walker leaves the warning

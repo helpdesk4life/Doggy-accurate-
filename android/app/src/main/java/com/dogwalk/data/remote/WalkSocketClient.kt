@@ -45,7 +45,7 @@ class WalkSocketClient @Inject constructor(
     private val json: Json,
     private val authStore: AuthStore,
     @param:ApplicationScope private val scope: CoroutineScope,
-) {
+) : WalkTransport {
     private val httpClient = OkHttpClient.Builder()
         .pingInterval(20, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
@@ -54,13 +54,13 @@ class WalkSocketClient @Inject constructor(
     private val lock = Any()
 
     private val _state = MutableStateFlow(ConnectionState.DISCONNECTED)
-    val state: StateFlow<ConnectionState> = _state.asStateFlow()
+    override val state: StateFlow<ConnectionState> = _state.asStateFlow()
 
     private val _frames = MutableSharedFlow<ServerFrame>(extraBufferCapacity = 128)
-    val frames: SharedFlow<ServerFrame> = _frames.asSharedFlow()
+    override val frames: SharedFlow<ServerFrame> = _frames.asSharedFlow()
 
     private val _authExpired = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
-    val authExpired: SharedFlow<Unit> = _authExpired.asSharedFlow()
+    override val authExpired: SharedFlow<Unit> = _authExpired.asSharedFlow()
 
     private var webSocket: WebSocket? = null
     private var endpoint: String? = null
@@ -69,7 +69,7 @@ class WalkSocketClient @Inject constructor(
     private var reconnectJob: Job? = null
     private var stopped = true
 
-    fun connect(endpoint: String, displayName: String) {
+    override fun connect(endpoint: String, displayName: String) {
         synchronized(lock) {
             this.endpoint = endpoint
             this.displayName = displayName
@@ -81,7 +81,7 @@ class WalkSocketClient @Inject constructor(
         }
     }
 
-    fun disconnect() {
+    override fun disconnect() {
         synchronized(lock) {
             stopped = true
             reconnectJob?.cancel()
@@ -93,7 +93,7 @@ class WalkSocketClient @Inject constructor(
     }
 
     /** Re-open after the caller has refreshed the access token. */
-    fun reconnect() {
+    override fun reconnect() {
         synchronized(lock) {
             if (stopped) return
             reconnectAttempt = 0
@@ -102,7 +102,7 @@ class WalkSocketClient @Inject constructor(
     }
 
     /** Returns false when the socket is not open, so the caller can drop the fix. */
-    fun sendLocation(
+    override fun sendLocation(
         latitude: Double,
         longitude: Double,
         accuracyMeters: Float,

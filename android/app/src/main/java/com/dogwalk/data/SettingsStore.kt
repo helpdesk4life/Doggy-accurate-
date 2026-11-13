@@ -27,20 +27,20 @@ import javax.inject.Singleton
 class SettingsStore @Inject constructor(
     @ApplicationContext context: Context,
     private val json: Json,
-) {
+) : WalkSettings {
     private val prefs = context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE)
 
     private val _backendUrl = MutableStateFlow(
         prefs.getString(KEY_BACKEND_URL, null) ?: BuildConfig.DEFAULT_BACKEND_URL,
     )
-    val backendUrl: StateFlow<String> = _backendUrl.asStateFlow()
+    override val backendUrl: StateFlow<String> = _backendUrl.asStateFlow()
 
     private val _displayName = MutableStateFlow(
         prefs.getString(KEY_DISPLAY_NAME, null) ?: DEFAULT_DOG_NAMES.random().also {
             prefs.edit().putString(KEY_DISPLAY_NAME, it).apply()
         },
     )
-    val displayName: StateFlow<String> = _displayName.asStateFlow()
+    override val displayName: StateFlow<String> = _displayName.asStateFlow()
 
     /**
      * How close another walker has to be before the phone buzzes. Independent of the
@@ -50,7 +50,7 @@ class SettingsStore @Inject constructor(
     private val _warningDistanceMeters = MutableStateFlow(
         prefs.getInt(KEY_WARNING_DISTANCE, DEFAULT_WARNING_DISTANCE_METERS),
     )
-    val warningDistanceMeters: StateFlow<Int> = _warningDistanceMeters.asStateFlow()
+    override val warningDistanceMeters: StateFlow<Int> = _warningDistanceMeters.asStateFlow()
 
     /**
      * Dogs the user has marked, keyed by walker id. A walker absent from this map

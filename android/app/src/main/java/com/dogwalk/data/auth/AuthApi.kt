@@ -24,7 +24,7 @@ import javax.inject.Singleton
 class AuthApi @Inject constructor(
     private val json: Json,
     private val settings: SettingsStore,
-) {
+) : TokenRefresher {
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
         .readTimeout(10, TimeUnit.SECONDS)
@@ -89,7 +89,7 @@ class AuthApi @Inject constructor(
             ),
         )
 
-    suspend fun refresh(refreshToken: String): TokenResponse =
+    override suspend fun refresh(refreshToken: String): TokenResponse =
         json.decodeFromString(
             send("POST", "/auth/refresh", json.encodeToString(RefreshRequest(refreshToken))),
         )

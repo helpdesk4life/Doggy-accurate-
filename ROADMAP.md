@@ -296,10 +296,11 @@ CI is in. `.github/workflows/ci.yml` runs `pytest`, `testDebugUnitTest` and
 fixed one real error. The open question is the runner — see **CI → Where it runs**
 in `HANDOFF.md`.
 
-**`WalkRepository` tests** are now the highest-value remaining coverage. It holds
-the proximity and session-renewal logic, and the notification-withdrawal fix is
-exactly the kind of thing a test would pin down. It needs `SettingsStore` behind
-an interface first, because that class takes a `Context`.
+**`WalkRepository` tests** landed. The repository now runs on three interfaces —
+`WalkSettings`, `WalkTransport` and `TokenRefresher`, each bound to its real
+class in `AppModule` — and ten tests pin the proximity bookkeeping (arrive once,
+not per fix; withdraw when the last dog leaves) and the three session-renewal
+branches (refresh, refusal, no token).
 
 If you would rather build something visible, **block a specific walker** (P3) is
 the natural sequel to friend groups: the marking UI and the settings list already

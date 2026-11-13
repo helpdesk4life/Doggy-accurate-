@@ -1,9 +1,15 @@
 package com.dogwalk.di
 
 import android.content.Context
+import com.dogwalk.data.SettingsStore
+import com.dogwalk.data.WalkSettings
+import com.dogwalk.data.auth.AuthApi
 import com.dogwalk.data.auth.AuthStore
 import com.dogwalk.data.auth.SecurePrefs
 import com.dogwalk.data.auth.SecureStore
+import com.dogwalk.data.auth.TokenRefresher
+import com.dogwalk.data.remote.WalkSocketClient
+import com.dogwalk.data.remote.WalkTransport
 import dagger.Module
 import dagger.Provides
 import dagger.hilt.InstallIn
@@ -46,4 +52,20 @@ object AppModule {
     @Singleton
     fun provideSecureStore(@ApplicationContext context: Context): SecureStore =
         SecurePrefs(context.getSharedPreferences(AuthStore.PREFS_NAME, Context.MODE_PRIVATE))
+
+    /**
+     * The seams [WalkRepository] tests through. The concrete classes already
+     * implement them step for step, so the bindings are one line each.
+     */
+    @Provides
+    @Singleton
+    fun provideWalkSettings(store: SettingsStore): WalkSettings = store
+
+    @Provides
+    @Singleton
+    fun provideWalkTransport(client: WalkSocketClient): WalkTransport = client
+
+    @Provides
+    @Singleton
+    fun provideTokenRefresher(api: AuthApi): TokenRefresher = api
 }
