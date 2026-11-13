@@ -24,3 +24,7 @@ Thumbs.db
 android/keystore.properties
 *.jks
 *.keystore
+
+# Runtime secrets. backend/.env on the VPS holds JWT_SECRET, which is the one
+# value that makes every token in the deployment forgeable.
+.env
