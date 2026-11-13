@@ -5,9 +5,9 @@ first when picking the project back up. For what to build next, see
 `ROADMAP.md`; for the iOS plan in full, `IOS-PORT.md`; for the iOS code that
 exists, `ios/README.md`.
 
-**Nothing is committed.** The working tree holds the whole admin panel plus the
-generated-password flow, uncommitted, on top of `7d26413 Eerste versie`. See
-**Uncommitted work** at the bottom before you start anything else.
+**The admin panel is committed** as `e5ed2ad admin pagina en account creation`,
+on top of `7d26413 Eerste versie`. The tree is clean. See **What landed in
+`e5ed2ad`** at the bottom for what that commit contains.
 
 ## What this project is
 
@@ -829,12 +829,12 @@ the user was locked out until they killed the app. `onSuccess` now sets
   clear app data during a test, set the name back to `Pickle` in settings before
   finishing, or the docs stop matching the device.
 
-## Uncommitted work
+## What landed in `e5ed2ad`
 
-**Nothing has been committed.** The tree sits on `7d26413 Eerste versie` with the
-whole admin panel and the generated-password flow uncommitted — several sessions
-of work in one diff. Commit it before starting anything new; a `git stash` or a
-bad `checkout` loses all of it.
+The admin panel and the generated-password flow are committed as
+`e5ed2ad admin pagina en account creation` (32 files, +3437/−97), on top of
+`7d26413 Eerste versie`. The tree is clean. It went in as one commit rather than
+the three-way split that was planned, so `git show e5ed2ad` is the whole story.
 
 New files:
 
@@ -853,19 +853,9 @@ Modified: `backend/app/{auth,config,main,ratelimit,routes_auth,users}.py`,
 auth files plus `strings.xml`, and `README.md` / `ROADMAP.md` / `HANDOFF.md` /
 `IOS-PORT.md`.
 
-A suggested split, if you want the history to be readable rather than one lump:
-
-1. `backend/app/admin.py` + `routes_admin.py` + `create_admin.py` +
-   `test_admin.py` + the `main.py` wiring — the API and the token boundary.
-2. `admin_ui.py` + `templates/` + `test_admin_ui.py` — the panel.
-3. `auth.py` / `users.py` / `routes_auth.py` / `config.py` + the Android auth
-   files — generated passwords and the forced change.
-
-Only the third split is self-contained; the first two share `admin.py`, so take
-them in order. The counts in `README.md` and `ROADMAP.md` (129 tests, 56 e2e
-checks) describe the final state, so land the docs last.
-
-Before committing, re-run the two gates:
+The counts in `README.md` and `ROADMAP.md` (129 tests, 56 e2e checks) describe
+this state. Re-run the gates to confirm the baseline before starting new work —
+`pytest` needs nothing, `e2e.py` needs the Docker stack up (see **Resuming**):
 
 ```bash
 cd /c/Users/thoma/Downloads/dog/backend

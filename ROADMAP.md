@@ -27,9 +27,8 @@ cd /c/Users/thoma/Downloads/dog/backend
 ./.venv/Scripts/python.exe scripts/e2e.py        # expect 56/56
 ```
 
-**Nothing is committed yet** — the admin panel and the generated-password flow
-are sitting in the working tree. See **Uncommitted work** in `HANDOFF.md` before
-you start anything else.
+**The admin panel is committed** as `e5ed2ad`, and the tree is clean. See
+**What landed in `e5ed2ad`** in `HANDOFF.md` for what that commit contains.
 
 The app is signed in as `fresh@example.com` / `hunter2hunter2` with dog `Pickle`.
 `emma@example.com` also uses `hunter2hunter2`. `buddy@example.com` was created by
