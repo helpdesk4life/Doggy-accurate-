@@ -317,8 +317,9 @@ so the command above is manual until you add one.
 - **No real email sender.** Reset codes go to the backend log, which is why
   `ALLOW_LOGGING_EMAIL=1` is in the `.env`. Anyone who can read
   `docker compose logs backend` can reset any account.
-- **No second gate on the admin panel.** `https://backend.thomasfeyens.be/admin/ui`
-  is reachable from the internet and protected by the operator password alone.
-  Caddy `basic_auth` on `/admin*` is the cheap fix.
+- ~~**No second gate on the admin panel.**~~ Closed: `/admin*` sits behind
+  Caddy `basic_auth` (user `thomas`) before the app's own login. The password
+  was set at deploy time and is not in this repository — regenerate with
+  `caddy hash-password`, edit `deploy/Caddyfile`, then step 10 again.
 - **No backups.** See step 12.
 - **No monitoring.** If the container dies, nothing tells you.

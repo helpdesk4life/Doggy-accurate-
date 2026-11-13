@@ -22,6 +22,12 @@
 backend.thomasfeyens.be {
 	encode zstd gzip
 
+	# Second gate on the admin panel, before the app's own login. The hash is
+	# bcrypt (caddy hash-password); rotate it there and reload.
+	basic_auth /admin* {
+		thomas $2a$14$NIrnjEIn.Xzciicgna58Veexun5uoLso/6zphh35WZvwA4c8UH/PO
+	}
+
 	reverse_proxy 127.0.0.1:8000 {
 		# Overwrite rather than append. Caddy's default appends to whatever the
 		# client sent, which would let a caller choose its own rate-limit bucket
