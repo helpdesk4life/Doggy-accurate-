@@ -1,7 +1,5 @@
 package com.dogwalk.data.auth
 
-import android.content.Context
-import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -22,12 +20,8 @@ import javax.inject.Singleton
  */
 @Singleton
 class AuthStore @Inject constructor(
-    @ApplicationContext context: Context,
+    private val prefs: SecureStore,
 ) {
-    private val prefs = SecurePrefs(
-        context.getSharedPreferences(PREFS_NAME, Context.MODE_PRIVATE),
-    )
-
     @Volatile
     private var access: String? = prefs.getString(KEY_ACCESS)
 
@@ -77,11 +71,11 @@ class AuthStore @Inject constructor(
         }
     }
 
-    private companion object {
-        const val PREFS_NAME = "dogwalk_auth"
-        const val KEY_ACCESS = "access_token"
-        const val KEY_REFRESH = "refresh_token"
-        const val KEY_USER_ID = "user_id"
-        const val KEY_EMAIL = "email"
+    companion object {
+        internal const val PREFS_NAME = "dogwalk_auth"
+        private const val KEY_ACCESS = "access_token"
+        private const val KEY_REFRESH = "refresh_token"
+        private const val KEY_USER_ID = "user_id"
+        private const val KEY_EMAIL = "email"
     }
 }

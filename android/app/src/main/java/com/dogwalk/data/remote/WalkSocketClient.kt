@@ -2,11 +2,10 @@ package com.dogwalk.data.remote
 
 import android.util.Log
 import com.dogwalk.data.auth.AuthStore
+import com.dogwalk.di.ApplicationScope
 import com.dogwalk.model.ConnectionState
 import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
-import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableSharedFlow
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -45,13 +44,13 @@ import kotlin.math.min
 class WalkSocketClient @Inject constructor(
     private val json: Json,
     private val authStore: AuthStore,
+    @param:ApplicationScope private val scope: CoroutineScope,
 ) {
     private val httpClient = OkHttpClient.Builder()
         .pingInterval(20, TimeUnit.SECONDS)
         .retryOnConnectionFailure(true)
         .build()
 
-    private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val lock = Any()
 
     private val _state = MutableStateFlow(ConnectionState.DISCONNECTED)
@@ -147,7 +146,7 @@ class WalkSocketClient @Inject constructor(
         synchronized(lock) {
             if (stopped) return
             if (reconnectJob?.isActive == true) return
-            val backoffMs = min(MAX_BACKOFF_MS, BASE_BACKOFF_MS shl min(reconnectAttempt, 5))
+            val backoffMs = backoffMillis(reconnectAttempt)
             reconnectAttempt++
             reconnectJob = scope.launch {
                 delay(backoffMs)
@@ -201,11 +200,21 @@ class WalkSocketClient @Inject constructor(
         }
     }
 
-    private companion object {
-        const val TAG = "WalkSocket"
-        const val NORMAL_CLOSURE = 1000
-        const val UNAUTHORIZED = 4401
-        const val BASE_BACKOFF_MS = 1_000L
-        const val MAX_BACKOFF_MS = 30_000L
+    companion object {
+        private const val TAG = "WalkSocket"
+        private const val NORMAL_CLOSURE = 1000
+        private const val UNAUTHORIZED = 4401
+        private const val BASE_BACKOFF_MS = 1_000L
+        private const val MAX_BACKOFF_MS = 30_000L
+
+        /**
+         * The reconnect ladder: 1 s, 2 s, 4 s, 8 s, 16 s, then 30 s forever.
+         *
+         * Exposed so the ladder can be asserted directly. Driving it through the
+         * socket would mean waiting real seconds for each rung, and the arithmetic
+         * is the part that can be wrong.
+         */
+        internal fun backoffMillis(attempt: Int): Long =
+            min(MAX_BACKOFF_MS, BASE_BACKOFF_MS shl min(attempt, 5))
     }
 }

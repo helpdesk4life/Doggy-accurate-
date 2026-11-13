@@ -564,6 +564,11 @@ cd /c/Users/thoma/Downloads/dog/backend
 # Create an operator for the admin panel at /admin/ui
 ./.venv/Scripts/python.exe scripts/create_admin.py --email you@example.com
 ./.venv/Scripts/python.exe scripts/create_admin.py --list
+
+# Android unit tests — JVM only, no emulator and no backend needed
+cd /c/Users/thoma/Downloads/dog/android
+export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
+./gradlew :app:testDebugUnitTest
 ```
 
 Accounts can also be created from the panel itself: the Accounts page has an
@@ -579,6 +584,7 @@ the operator loses the password before handing it over, delete the account and
 make another — only a hash is stored.
 
 `pytest -q` → **129 passed**. `scripts/e2e.py` → **56/56 passed**.
+`./gradlew :app:testDebugUnitTest` → **19 passed**.
 
 | Test file | Covers |
 | --- | --- |
@@ -712,6 +718,39 @@ throwaway account derived from `--email`.
   returned, so re-entry still alerts. Stopping the walk cleared both `2001` and
   the foreground `1001`.
 
+## Android tests
+
+19 JVM tests in `android/app/src/test/`, run with
+`./gradlew :app:testDebugUnitTest`. No emulator, no backend, no Robolectric.
+
+| File | Covers |
+| --- | --- |
+| `data/auth/AuthStoreTest.kt` | The sign-in state machine: save, updateTokens, clear, and the three restore cases |
+| `data/remote/WalkSocketClientTest.kt` | Connect, bearer header, name query parameter, frame decoding, 4401, reconnect, disconnect, the backoff ladder |
+| `testing/InMemorySecureStore.kt` | Shared fake, not a test |
+
+Four things about the setup that will cost time if undone:
+
+1. **`SecureStore` exists so `AuthStore` can be built on the JVM.** `SecurePrefs`
+   needs the Android Keystore, which does not exist off-device. `AuthStore` takes
+   the interface and `AppModule` binds the real implementation, so the tests use
+   an in-memory map while the app still gets AES-GCM.
+2. **`WalkSocketClient` takes the application scope.** It used to build its own
+   `CoroutineScope(SupervisorJob() + Dispatchers.IO)`, which leaked and could not
+   be cancelled by a test.
+3. **The socket tests use `runBlocking`, not `runTest`.** OkHttp delivers its
+   callbacks on its own threads, so virtual time advances past a real event and
+   turns every wait into a timeout. `runTest` is right for pure logic and wrong
+   for anything waiting on the network stack.
+4. **The fake server has to ack the client's close in `onClosing`**, for exactly
+   the reason the client does. `MockWebServer.shutdown()` waits for its queues to
+   go idle and throws `Gave up waiting for queue to shut down` if a socket is left
+   half-open. That failure surfaces in `tearDown`, so it reads like a broken test
+   rather than a broken fake.
+
+`backoffMillis()` is `internal` rather than private so the ladder can be asserted
+directly; driving it through the socket would mean waiting real seconds per rung.
+
 ## Three bugs fixed, worth not reintroducing
 
 **OkHttp `onClosing` must acknowledge the close.** OkHttp only calls `onClosed`
@@ -737,8 +776,13 @@ the user was locked out until they killed the app. `onSuccess` now sets
 
 ## Known gaps
 
-- **No Android tests at all.** The client is the half of the codebase with no
-  safety net; two of the three bugs above would have been caught by one test each.
+- **The Android tests cover the transport and the session, not the rest.** 19
+  tests: `WalkSocketClient` (connect, bearer header, frame decoding, 4401,
+  reconnect, the backoff ladder) and `AuthStore` (the sign-in state machine).
+  `WalkRepository`, `SettingsStore`, `NotificationHelper` and the Compose UI have
+  none. `WalkRepository` is the next one worth doing — it holds the proximity
+  logic — but it needs `SettingsStore` behind an interface first, because that
+  class takes a `Context`.
 - No reconnect backoff tuning — the client reconnects, but the retry cadence has
   not been stress-tested against a backend that stays down.
 - **The proximity alert is withdrawn when the last walker leaves the warning

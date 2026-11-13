@@ -30,12 +30,12 @@ import javax.crypto.spec.GCMParameterSpec
 class SecurePrefs(
     private val prefs: SharedPreferences,
     private val keyAlias: String = DEFAULT_KEY_ALIAS,
-) {
+) : SecureStore {
     private val keyStore: KeyStore = KeyStore.getInstance(ANDROID_KEYSTORE).apply { load(null) }
 
     private val key: SecretKey by lazy { loadOrCreateKey() }
 
-    fun getString(key: String): String? {
+    override fun getString(key: String): String? {
         val stored = prefs.getString(key, null) ?: return null
         val plaintext = decrypt(stored)
         if (plaintext == null) {
@@ -47,11 +47,11 @@ class SecurePrefs(
         return plaintext
     }
 
-    fun putString(key: String, value: String) {
+    override fun putString(key: String, value: String) {
         prefs.edit().putString(key, encrypt(value)).apply()
     }
 
-    fun clear() {
+    override fun clear() {
         prefs.edit().clear().apply()
     }
 

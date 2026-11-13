@@ -81,6 +81,13 @@ android {
             excludes += "/META-INF/{AL2.0,LGPL2.1}"
         }
     }
+
+    // The unit tests run on the JVM, where android.util.Log and friends are stubs
+    // that throw. Returning defaults lets the classes under test call them without
+    // dragging in Robolectric for what is otherwise pure Kotlin.
+    testOptions {
+        unitTests.isReturnDefaultValues = true
+    }
 }
 
 kotlin {
@@ -115,4 +122,9 @@ dependencies {
     implementation(libs.okhttp)
     implementation(libs.kotlinx.serialization.json)
     implementation(libs.kotlinx.coroutines.android)
+
+    testImplementation(libs.junit)
+    testImplementation(libs.kotlinx.coroutines.test)
+    testImplementation(libs.okhttp.mockwebserver)
+    testImplementation(libs.turbine)
 }

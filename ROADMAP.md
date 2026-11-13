@@ -236,10 +236,12 @@ deploy mid-evening annoys someone.
 
 ## P2 — quality, before or shortly after launch
 
-- **Zero Android tests.** No `test/` or `androidTest/` directory at all. The
-  backend has 129 tests; the client has none. The highest-value first tests are
-  `WalkSocketClient` reconnect/refresh behaviour and `AuthStore` state transitions
-  — the `isBusy` bug fixed this session would have been caught by one.
+- **Android tests cover two classes.** 19 tests now exist for `WalkSocketClient`
+  and `AuthStore`. `WalkRepository` is the next target and the most valuable one,
+  because it holds the proximity and session-renewal logic — but it takes a
+  concrete `SettingsStore`, which needs a `Context`, so that class has to go
+  behind an interface first. `NotificationHelper` and the Compose UI have no
+  tests at all.
 - **No CI.** No `.github/`. `pytest` and `assembleDebug` are cheap enough to run
   on every push.
 - **Reconnect backoff is untested.** The client backs off 1 s → 30 s, but nobody
@@ -281,11 +283,14 @@ deploy mid-evening annoys someone.
 
 ## Suggested next session
 
-The security pass and the friend groups are both closed, so the next session should
-be about confidence rather than features. Take **the first Android tests** (P2):
-`WalkSocketClient` reconnect/refresh and `AuthStore` state transitions. The client
-is the half of the codebase with no safety net, and two of the three bugs fixed in
-the security session were client bugs that a single test each would have caught.
+The first Android tests are in: 19 of them, covering `WalkSocketClient` and
+`AuthStore`. The next step is **CI** (P2) — `pytest` and `testDebugUnitTest` are
+both cheap and there is still no `.github/`, so nothing runs them automatically.
+
+After that, **`WalkRepository` tests** are the highest-value remaining coverage.
+It holds the proximity and session-renewal logic, and the notification-withdrawal
+fix from this session is exactly the kind of thing a test would pin down. It needs
+`SettingsStore` behind an interface first, because that class takes a `Context`.
 
 If you would rather build something visible, **block a specific walker** (P3) is
 the natural sequel to friend groups: the marking UI and the settings list already
