@@ -97,9 +97,10 @@ base64. A value that fails to decrypt is dropped rather than crashing the app.
 ### 3. No password reset — done
 
 **Decision: build it, log the email.** Full reset-token flow with a pluggable
-sender. `app/email.py` defines an `EmailSender` protocol and a
-`LoggingEmailSender` that writes the code to the backend log; swapping in a real
-provider is one class and one line in `create_app`.
+sender. `app/email.py` defines an `EmailSender` protocol, a `LoggingEmailSender`
+that writes the code to the backend log, and a `build_sender` factory that
+`EMAIL_SENDER` selects from. Swapping in a real provider is one class plus one
+branch in that factory.
 
 Codes are 6 digits, stored as a sha256 key, valid 15 minutes, single use, capped
 at 10 attempts. `POST /auth/password-reset/request` returns 202 whether or not the
@@ -266,9 +267,12 @@ deploy mid-evening annoys someone.
   valid invite code has been spent, so an uninvited caller learns nothing. Anyone
   holding a code can still probe, and a leaked code is a leaked invitation. Email
   verification is the general fix and would let the gate come off.
-- **Reset codes are logged in development.** `LoggingEmailSender` writes the code
-  to the backend log. Fine for a dev box, not for anything shared — swap in a real
-  sender before the first non-LAN user.
+- **Reset codes are logged, and that is now a boot failure outside development.**
+  `LoggingEmailSender` writes the code to the backend log, so `Settings.validate()`
+  refuses to start unless `ALLOW_LOGGING_EMAIL=1` acknowledges it. The remaining
+  work is a real sender: implement `EmailSender`, add it to `email.build_sender`,
+  and set `EMAIL_SENDER` to its name. Until then the acknowledgement is the only
+  thing standing between a log reader and any account.
 
 ## P3 — product ideas, not commitments
 

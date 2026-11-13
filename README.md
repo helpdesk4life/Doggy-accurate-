@@ -74,6 +74,8 @@ python -m venv .venv
 | `PUBLIC_BASE_URL` | `http://localhost:8000` | Base URL used to build the link in a password-reset email |
 | `RATE_LIMIT_ENABLED` | `1` | Per-IP throttling on the auth endpoints |
 | `INVITE_REQUIRED` | `1` | Registration needs a single-use code |
+| `EMAIL_SENDER` | `logging` | Which `EmailSender` to install. Only `logging` exists today |
+| `ALLOW_LOGGING_EMAIL` | `0` | Acknowledges that reset codes go to the log, outside development |
 
 `JWT_SECRET` has a built-in development default, and `Settings.validate()` runs at
 `create_app` time. Outside development the backend **refuses to boot** if the
@@ -85,6 +87,14 @@ where anyone who has read this repository can mint a token for any account. Set
 `DISTANCE_QUANTUM_M` and `BEARING_QUANTUM_DEG` are the privacy budget for
 proximity alerts; see [Privacy](#privacy). Setting either to `0` disables
 quantisation and broadcasts positions to within a few metres — development only.
+
+The only email sender is `LoggingEmailSender`, which writes the whole message —
+including a password-reset code — to the backend log. Outside development the
+backend **refuses to boot** with it, for the same reason as the secret: a reset
+code in a log is a working account takeover for anyone who can read that log.
+Set `ALLOW_LOGGING_EMAIL=1` to accept that on a box whose logs nobody else can
+read, or implement a real sender in `app/email.py`, add it to `build_sender`, and
+set `EMAIL_SENDER` to its name.
 
 ### Tests
 

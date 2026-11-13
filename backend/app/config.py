@@ -66,6 +66,16 @@ class Settings:
     # only once there is email verification to replace it.
     invite_required: bool = os.getenv("INVITE_REQUIRED", "1") not in {"0", "false", "no"}
 
+    # Which EmailSender to install. Only "logging" exists today, and it writes the
+    # whole message — including a password-reset code — to the backend log. See
+    # validate(): outside development that is refused unless it is acknowledged.
+    email_sender: str = os.getenv("EMAIL_SENDER", "logging")
+
+    # The acknowledgement. A reset code in a log is a working account takeover for
+    # anyone who can read that log, so the default is to refuse to boot rather
+    # than to warn. Set this only on a box whose logs nobody else can read.
+    allow_logging_email: bool = os.getenv("ALLOW_LOGGING_EMAIL", "0") not in {"0", "false", "no"}
+
     @property
     def is_development(self) -> bool:
         return self.environment.strip().lower() in DEVELOPMENT_ENVIRONMENTS
@@ -103,6 +113,20 @@ class Settings:
                 "DISTANCE_QUANTUM_M and BEARING_QUANTUM_DEG must not be negative. "
                 "Zero disables quantisation, which broadcasts positions to within "
                 "a few metres; only do that on a development machine."
+            )
+
+        if (
+            self.email_sender == "logging"
+            and not self.is_development
+            and not self.allow_logging_email
+        ):
+            raise RuntimeError(
+                "EMAIL_SENDER is 'logging', which writes password-reset codes to "
+                f"the backend log, and DOGWALK_ENV is {self.environment!r}. Anyone "
+                "who can read that log can reset any account, so this is refused "
+                "rather than warned about. Implement a real sender in "
+                "app/email.py and set EMAIL_SENDER to it, or set "
+                "ALLOW_LOGGING_EMAIL=1 if the logs are readable only by you."
             )
 
 

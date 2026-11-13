@@ -84,7 +84,7 @@ def create_app(
             decode_responses=True,
         )
         app.state.hub = Hub()
-        app.state.email_sender = email.LoggingEmailSender()
+        app.state.email_sender = email.build_sender(config.settings.email_sender)
         task = asyncio.create_task(sweep_loop(app))
         try:
             yield

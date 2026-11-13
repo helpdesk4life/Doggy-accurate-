@@ -859,8 +859,10 @@ the user was locked out until they killed the app. `onSuccess` now sets
   a code can still probe addresses, and a leaked code is a leaked invitation.
   Email verification is the general fix; until then keep `INVITE_REQUIRED=1` and
   mint codes one at a time.
-- `LoggingEmailSender` writes reset codes to the backend log. Fine for a dev box,
-  not for anything shared — swap in a real sender before the first non-LAN user.
+- `LoggingEmailSender` writes reset codes to the backend log. Outside development
+  the backend now refuses to boot with it unless `ALLOW_LOGGING_EMAIL=1` says so
+  explicitly — see `Settings.validate()`. The real fix is still a provider:
+  implement `EmailSender`, add it to `email.build_sender`, set `EMAIL_SENDER`.
 - **The admin panel has no second gate.** It is protected by the operator password
   and nothing else. For anything beyond a trusted network, put Caddy's
   `basic_auth` or an IP allowlist in front of `/admin/*`. The lockout is tighter

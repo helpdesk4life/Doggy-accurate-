@@ -8,7 +8,7 @@ import fakeredis.aioredis
 import pytest
 from fastapi.testclient import TestClient
 
-from app import config, users
+from app import config, email, users
 from app.main import create_app
 
 PASSWORD = "correct-horse-battery"
@@ -261,9 +261,47 @@ def test_production_accepts_a_real_secret():
     settings = config.Settings(
         environment="production",
         jwt_secret="a" * 48,
+        # The email guard is a separate check; see the tests below.
+        allow_logging_email=True,
     )
 
     settings.validate()
+
+
+def test_production_refuses_to_log_reset_codes():
+    settings = config.Settings(
+        environment="production",
+        jwt_secret="a" * 48,
+    )
+
+    with pytest.raises(RuntimeError, match="EMAIL_SENDER"):
+        settings.validate()
+
+
+def test_production_accepts_an_acknowledged_logging_sender():
+    settings = config.Settings(
+        environment="production",
+        jwt_secret="a" * 48,
+        allow_logging_email=True,
+    )
+
+    settings.validate()
+
+
+def test_development_tolerates_the_logging_sender():
+    config.Settings(
+        environment="development",
+        jwt_secret=config.DEV_JWT_SECRET,
+    ).validate()
+
+
+def test_an_unknown_sender_is_refused_at_startup():
+    with pytest.raises(RuntimeError, match="Unknown EMAIL_SENDER"):
+        email.build_sender("carrier-pigeon")
+
+
+def test_the_logging_sender_is_what_the_default_name_builds():
+    assert isinstance(email.build_sender("logging"), email.LoggingEmailSender)
 
 
 def test_development_tolerates_the_public_secret():

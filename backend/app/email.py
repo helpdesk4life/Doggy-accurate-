@@ -2,11 +2,13 @@
 
 There is exactly one implementation today: a sender that writes the message to
 the log. That is deliberate. The password-reset flow is complete and testable
-without an email provider, and swapping in a real one is a single class plus one
-line in ``main.py``.
+without an email provider.
 
-To go live, implement ``EmailSender`` against your provider and assign it to
-``app.state.email_sender`` in the lifespan. Nothing else changes.
+To go live, implement ``EmailSender`` against your provider, add it to
+``build_sender``, and set ``EMAIL_SENDER`` to its name. ``Settings.validate()``
+refuses to boot outside development while the configured sender is the logging
+one, because a reset code in a log is a working account takeover for anyone who
+can read that log.
 """
 
 import logging
@@ -24,6 +26,17 @@ class LoggingEmailSender:
 
     async def send(self, to: str, subject: str, body: str) -> None:
         logger.info("email to %s | %s\n%s", to, subject, body)
+
+
+def build_sender(name: str) -> EmailSender:
+    """Construct the sender named by ``EMAIL_SENDER``.
+
+    Add providers here. The name is resolved at startup rather than at the first
+    reset request, so a typo fails the boot instead of silently dropping mail.
+    """
+    if name == "logging":
+        return LoggingEmailSender()
+    raise RuntimeError(f"Unknown EMAIL_SENDER {name!r}. Known senders: logging.")
 
 
 def reset_email_body(code: str, ttl_minutes: int) -> str:
