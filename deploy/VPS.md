@@ -55,10 +55,18 @@ If that does not work, fix it now. Everything after this assumes it does.
 
 ## 2. Harden SSH
 
-Only once step 1's check has passed:
+Only once step 1's check has passed.
+
+**The filename matters.** `sshd` uses the *first* value it sees for each keyword,
+and it reads `sshd_config.d/*.conf` in lexical order. Cloud images ship
+`50-cloud-init.conf`, which on many providers contains `PasswordAuthentication yes`.
+A file named `99-dogwalk.conf` sorts after it and is therefore **silently ignored**:
+you reload, see no error, and are still accepting passwords. `00-` sorts first.
 
 ```bash
-cat > /etc/ssh/sshd_config.d/99-dogwalk.conf <<'EOF'
+ls /etc/ssh/sshd_config.d/          # expect 50-cloud-init.conf on a cloud image
+
+cat > /etc/ssh/sshd_config.d/00-dogwalk.conf <<'EOF'
 PermitRootLogin no
 PasswordAuthentication no
 KbdInteractiveAuthentication no
@@ -67,7 +75,18 @@ EOF
 sshd -t && systemctl reload ssh
 ```
 
-`sshd -t` validates before you reload. If it prints nothing, the config is good.
+`sshd -t` validates the syntax before you reload; silence means it parsed.
+
+**Do not trust the file — check the effective config:**
+
+```bash
+sshd -T | grep -Ei '^(permitrootlogin|passwordauthentication|kbdinteractiveauthentication)'
+```
+
+All three must read `no`. `sshd -T` prints what sshd will actually use after every
+drop-in has been merged, so it is the only check that catches the ordering trap.
+If a line says `yes`, a file earlier in the directory is winning — delete or edit
+that file and run it again.
 
 Verify, again in a new terminal:
 
@@ -90,6 +109,11 @@ ufw allow 443/tcp
 ufw enable
 ufw status verbose
 ```
+
+Order matters: `allow 22/tcp` must come **before** `ufw enable`, or you cut the
+connection you are typing over. `ufw enable` asks *"Command may disrupt existing
+ssh connections. Proceed with operation (y|n)?"* — answer `y`, the rule is already
+in place.
 
 80 and 443 are for Caddy: 80 for the ACME challenge and the HTTP→HTTPS redirect,
 443 for everything else. Nothing else is open.
