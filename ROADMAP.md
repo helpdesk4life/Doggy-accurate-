@@ -243,10 +243,12 @@ deploy mid-evening annoys someone.
   concrete `SettingsStore`, which needs a `Context`, so that class has to go
   behind an interface first. `NotificationHelper` and the Compose UI have no
   tests at all.
-- **CI has never actually run.** `.github/workflows/ci.yml` exists and every job's
-  command was run by hand, but `origin` is a self-hosted Gitea and no runner has
-  picked up a job yet. See **CI → Where it runs** in `HANDOFF.md` for the two
-  things that have to be true on that box.
+- **CI is green but cannot gate anything.** `.github/workflows/ci.yml` runs all
+  three jobs on every push and passed on `9bd0114` (134 backend tests, 56/56 e2e,
+  Android tests + lint). But `main` has no branch protection: GitHub refuses it on
+  a private repo without Pro (`403 Upgrade to GitHub Pro`), so a red run does not
+  block a merge. Nothing deploys either — the VPS pulls by hand. See
+  **CI → Where it runs** in `HANDOFF.md`.
 - **Reconnect backoff is untested.** The client backs off 1 s → 30 s, but nobody
   has run it against a backend that stays down for minutes. Worth a manual pass
   and then a test.

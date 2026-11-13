@@ -137,30 +137,44 @@ and no certbot.
 
 ## 7. Get the code onto the box
 
-**Your Gitea is at `192.168.3.70:2222`, which is a private address.** The VPS
-cannot reach it, so `git clone` from the server will hang and then fail. Ship a
-bundle instead.
+The repository is private (`github.com/helpdesk4life/doggy`), so the VPS needs
+its own key. Use a **deploy key**: it is scoped to that one repository and
+read-only, so a compromised server cannot reach anything else in the account.
 
-On your laptop:
+On the VPS, as `thomas`:
 
 ```bash
-cd /c/Users/thoma/Downloads/dog
-git bundle create /tmp/dog.bundle --all
-scp /tmp/dog.bundle thomas@207.180.240.29:~/
+ssh-keygen -t ed25519 -C "dogwalk-vps" -f ~/.ssh/github_dogwalk -N ""
+cat ~/.ssh/github_dogwalk.pub
 ```
 
-On the VPS:
+Copy that line. In GitHub: **repo → Settings → Deploy keys → Add deploy key**,
+title `dogwalk-vps`, paste the key, leave **Allow write access** unchecked.
+
+Then, still on the VPS:
 
 ```bash
-git clone ~/dog.bundle ~/dog
+cat >> ~/.ssh/config <<'EOF'
+Host github.com
+  IdentityFile ~/.ssh/github_dogwalk
+  IdentitiesOnly yes
+EOF
+chmod 600 ~/.ssh/config
+
+ssh -T git@github.com
+git clone git@github.com:helpdesk4life/doggy.git ~/dog
 cd ~/dog && git log --oneline -1
 ```
 
-The bundle is ~19 MB and carries full history, so `git log` and `git diff` work
-normally on the server. To update later, repeat the bundle and `git pull ~/dog.bundle`.
+`ssh -T` answers `Hi helpdesk4life/doggy! You've successfully authenticated, but
+GitHub does not provide shell access.` — that is success. It also accepts
+GitHub's host key on the way, so the clone does not prompt.
 
-The durable fix is a remote both machines can reach — a public GitHub mirror, or
-exposing Gitea. Until then the bundle is the transport.
+`IdentitiesOnly yes` is not optional. Without it SSH offers every key it holds,
+GitHub rejects the first few, and the clone dies with `Too many authentication
+failures`.
+
+Updates are then a plain `git pull`. No bundle, no `scp`.
 
 ## 8. Backend
 
@@ -262,10 +276,8 @@ The issuer should be Let's Encrypt (or ZeroSSL), not "Caddy Local Authority".
 # logs
 cd ~/dog/backend && docker compose logs -f backend
 
-# update the code
-#   on the laptop: git bundle create /tmp/dog.bundle --all && scp ...
-#   on the VPS:
-cd ~/dog && git pull ~/dog.bundle main && cd backend && docker compose up -d --build backend
+# update the code (the deploy key is pull-only, so this is the whole procedure)
+cd ~/dog && git pull && cd backend && docker compose up -d --build backend
 
 # back up the accounts. The geo index is disposable; the user store is not.
 docker run --rm -v backend_redis-data:/data -v "$PWD":/backup alpine \

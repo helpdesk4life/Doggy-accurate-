@@ -789,19 +789,21 @@ that an action tag exists, so the pinned majors were confirmed separately with
 
 ### Where it runs
 
-`origin` is a self-hosted Gitea (28.3.0) at `192.168.3.70:3000`, not GitHub. Gitea
-Actions reads `.github/workflows/` and takes the same syntax, so the file is the
-same either way — but two things have to be true on that box before a run appears:
+GitHub Actions, on `github.com/helpdesk4life/doggy` (private). The first run,
+`9bd0114`, finished green on all three jobs:
 
-1. **A runner is registered.** `act_runner` has to be installed and joined to the
-   instance. Without one, a push queues nothing and the Actions tab stays empty.
-   The instance reports zero workflow runs so far, which is consistent with either
-   no runner or no workflow ever having been pushed.
-2. **The runner can reach Docker.** The `e2e` job runs `docker compose` on the
-   host, so the runner container needs `/var/run/docker.sock` mounted, or a
-   Docker-in-Docker sidecar. The `backend` and `android` jobs need nothing special.
-   If the runner cannot do this, delete the `e2e` job — the other two still cover
-   the unit suites, and `scripts/e2e.py` stays runnable by hand.
+| Job | Result | Evidence from the log |
+|---|---|---|
+| Backend tests | success | `134 passed, 1 warning in 16.91s` |
+| End-to-end against real Redis | success | `56/56 passed` |
+| Android tests and lint | success | `BUILD SUCCESSFUL in 3m 35s`, `testDebugUnitTest` and `lintDebug` both executed |
+
+The two `skipped` steps in that run — `Upload reports` and `Dump container logs`
+— are both `if: failure()`, so skipping is the correct outcome on a green run.
+
+`origin` is still the self-hosted Gitea at `192.168.3.70:2222`, a private address
+the VPS cannot reach. `github` is the remote that matters: it is what CI watches
+and what the server clones from. Push to both, or drop `origin`.
 
 `.github/dependabot.yml` bumps the action majors weekly. They move: `checkout` went
 v5 → v7 while this project has existed, and a deprecated major fails the run rather
