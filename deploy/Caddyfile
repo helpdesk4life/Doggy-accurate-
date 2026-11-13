@@ -1,0 +1,52 @@
+# Host Caddy on the VPS (207.180.240.29).
+#
+#   sudo cp deploy/Caddyfile /etc/caddy/Caddyfile
+#   sudo systemctl reload caddy
+#
+# Two sites, one box:
+#   backend.thomasfeyens.be -> the FastAPI container on 127.0.0.1:8000
+#   maps.thomasfeyens.be    -> static PMTiles, fonts and sprites from /srv/maps
+#
+# Certificates are issued and renewed by Caddy itself. Nothing schedules a
+# renewal: Caddy renews at two thirds of the certificate lifetime and reloads
+# without a restart. It needs ports 80 and 443 reachable from the internet and
+# both names resolving to this host before the first request.
+#
+# This is the production config. backend/Caddyfile is the local one, which uses
+# `tls internal` so the emulator can reach wss://10.0.2.2:8443 without a domain.
+{
+	# ACME account contact, used for expiry warnings.
+	email thomas.feyens@gmail.com
+}
+
+backend.thomasfeyens.be {
+	encode zstd gzip
+
+	reverse_proxy 127.0.0.1:8000 {
+		# Overwrite rather than append. Caddy's default appends to whatever the
+		# client sent, which would let a caller choose its own rate-limit bucket
+		# by forging X-Forwarded-For. The backend bills the first value, so it
+		# has to be the real peer address.
+		header_up X-Forwarded-For {remote_host}
+	}
+}
+
+maps.thomasfeyens.be {
+	root * /srv/maps
+
+	# MapLibre Native mishandles a 304 on glyphs and renders no text at all, so
+	# the font and sprite responses must never carry a cache validator. Without
+	# ETag or Last-Modified the server can only answer 200. See HANDOFF.md.
+	@assets path /fonts/* /sprites/*
+	header @assets -Etag
+	header @assets -Last-Modified
+
+	# Lets the archive be opened in pmtiles.io to sanity-check it, and costs
+	# nothing for the app, which is not a browser and ignores CORS.
+	header Access-Control-Allow-Origin "*"
+	header Access-Control-Expose-Headers "Content-Range, Content-Length, Accept-Ranges"
+
+	# No `encode` here: .pmtiles and .pbf are already compressed, and gzipping
+	# them again burns CPU on every range request for no gain.
+	file_server
+}
