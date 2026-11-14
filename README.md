@@ -8,8 +8,8 @@ Two halves:
 - `backend/` — FastAPI over WebSockets, Redis GEO for the proximity maths, Dockerised, with Caddy terminating TLS.
 
 See `HANDOFF.md` for current state, verification commands and known gaps,
-`ROADMAP.md` for what to build next, and `IOS-PORT.md` for the plan to bring this
-to iPhone. `ios/` holds the first slice of that port — the background location
+`ROADMAP.md` for what to build next, `IOS-PORT.md` for the plan to bring this
+to iPhone, and `UPGRADING.md` for how to bump dependencies safely. `ios/` holds the first slice of that port — the background location
 and socket layer, which is the part that decides whether the product works.
 
 ```

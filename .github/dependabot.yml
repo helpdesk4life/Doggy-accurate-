@@ -10,3 +10,21 @@ updates:
       interval: weekly
     commit-message:
       prefix: ci
+
+  # Backend Python: registers every requirements*.txt in backend/, so both
+  # requirements.txt and requirements-dev.txt are covered.
+  - package-ecosystem: pip
+    directory: /backend
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: deps
+
+  # Android: version catalog support, so libs.versions.toml entries are bumped.
+  # See UPGRADING.md before merging — Kotlin/KSP and AGP/Gradle move together.
+  - package-ecosystem: gradle
+    directory: /android
+    schedule:
+      interval: weekly
+    commit-message:
+      prefix: deps
