@@ -24,7 +24,7 @@ import secrets
 import time
 import uuid
 
-from app import auth
+from app import auth, blocks
 
 USER_KEY = "dogwalk:users:{user_id}"
 EMAIL_KEY = "dogwalk:users:email:{email}"
@@ -215,10 +215,16 @@ async def delete_user(redis, user_id: str) -> None:
     The refresh index exists so this does not have to scan the keyspace for
     ``dogwalk:refresh:*``. The geo entry is left to the WebSocket handler, which
     removes it when the socket closes.
+
+    Block lists go too, in both directions: the deleted account's own list, and
+    the entries in other people's lists that point at it. Leaving those behind
+    would show a name in someone's settings for an account that no longer exists.
     """
     user = await get_by_id(redis, user_id)
     if user is None:
         return
+
+    await blocks.forget(redis, user_id)
 
     jtis = await redis.smembers(REFRESH_INDEX_KEY.format(user_id=user_id))
     async with redis.pipeline(transaction=True) as pipe:

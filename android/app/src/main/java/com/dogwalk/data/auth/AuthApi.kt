@@ -1,6 +1,7 @@
 package com.dogwalk.data.auth
 
 import com.dogwalk.data.SettingsStore
+import com.dogwalk.data.remote.httpBaseOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.encodeToString
@@ -136,7 +137,7 @@ class AuthApi @Inject constructor(
     ): String = withContext(Dispatchers.IO) {
         val requestBody = body.toRequestBody(jsonMedia)
         val builder = Request.Builder()
-            .url(httpBase() + path)
+            .url(httpBaseOf(settings.backendUrl.value) + path)
             .apply { if (accessToken != null) header("Authorization", "Bearer $accessToken") }
 
         when (method) {
@@ -154,16 +155,6 @@ class AuthApi @Inject constructor(
                 throw AuthException(detail.ifBlank { "HTTP ${response.code}" })
             }
             text
-        }
-    }
-
-    /** ws://host:8000/ws/walk -> http://host:8000 */
-    private fun httpBase(): String {
-        val base = settings.backendUrl.value.substringBefore("/ws/")
-        return when {
-            base.startsWith("wss://") -> "https://" + base.removePrefix("wss://")
-            base.startsWith("ws://") -> "http://" + base.removePrefix("ws://")
-            else -> base
         }
     }
 }

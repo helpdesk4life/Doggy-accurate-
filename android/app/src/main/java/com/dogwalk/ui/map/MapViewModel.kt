@@ -6,7 +6,9 @@ import com.dogwalk.data.SettingsStore
 import com.dogwalk.data.auth.AuthApi
 import com.dogwalk.data.auth.AuthState
 import com.dogwalk.data.auth.AuthStore
+import com.dogwalk.data.blocks.BlocksApi
 import com.dogwalk.data.repository.WalkRepository
+import com.dogwalk.model.BlockedWalker
 import com.dogwalk.model.ConnectionState
 import com.dogwalk.model.DogRelationship
 import com.dogwalk.model.MarkedDog
@@ -34,6 +36,7 @@ data class MapUiState(
     val backendUrl: String = "",
     val email: String = "",
     val markedDogs: Map<String, MarkedDog> = emptyMap(),
+    val blocked: List<BlockedWalker> = emptyList(),
 )
 
 /** Progress of the delete-account confirmation in the settings sheet. */
@@ -42,12 +45,24 @@ data class DeleteAccountState(
     val error: String? = null,
 )
 
+/**
+ * Progress of a block or unblock.
+ *
+ * A failure has to be visible: someone who thinks they are hidden but is not is
+ * worse off than someone who never tapped the button.
+ */
+data class BlockState(
+    val isBusy: Boolean = false,
+    val failed: Boolean = false,
+)
+
 @HiltViewModel
 class MapViewModel @Inject constructor(
     private val repository: WalkRepository,
     private val settings: SettingsStore,
     private val authStore: AuthStore,
     private val authApi: AuthApi,
+    private val blocksApi: BlocksApi,
 ) : ViewModel() {
 
     private data class Session(
@@ -57,7 +72,10 @@ class MapViewModel @Inject constructor(
         val isTracking: Boolean,
         val radiusMeters: Double,
         val markedDogs: Map<String, MarkedDog>,
+        val blocked: List<BlockedWalker>,
     )
+
+    private val _blocked = MutableStateFlow<List<BlockedWalker>>(emptyList())
 
     // Nested because combine has typed overloads only up to five flows, and the
     // marked dogs belong with the rest of the map data rather than the settings.
@@ -69,10 +87,13 @@ class MapViewModel @Inject constructor(
             repository.isTracking,
             repository.radiusMeters,
         ) { self, nearby, connection, isTracking, radiusMeters ->
-            Session(self, nearby, connection, isTracking, radiusMeters, emptyMap())
+            Session(self, nearby, connection, isTracking, radiusMeters, emptyMap(), emptyList())
         },
         settings.markedDogs,
-    ) { current, markedDogs -> current.copy(markedDogs = markedDogs) }
+        _blocked,
+    ) { current, markedDogs, blocked ->
+        current.copy(markedDogs = markedDogs, blocked = blocked)
+    }
 
     private val email = authStore.state.map { state ->
         (state as? AuthState.SignedIn)?.email.orEmpty()
@@ -80,6 +101,9 @@ class MapViewModel @Inject constructor(
 
     private val _deleteAccount = MutableStateFlow(DeleteAccountState())
     val deleteAccount: StateFlow<DeleteAccountState> = _deleteAccount.asStateFlow()
+
+    private val _blockState = MutableStateFlow(BlockState())
+    val blockState: StateFlow<BlockState> = _blockState.asStateFlow()
 
     val uiState: StateFlow<MapUiState> = combine(
         session,
@@ -99,12 +123,17 @@ class MapViewModel @Inject constructor(
             backendUrl = backendUrl,
             email = email,
             markedDogs = current.markedDogs,
+            blocked = current.blocked,
         )
     }.stateIn(
         scope = viewModelScope,
         started = SharingStarted.WhileSubscribed(5_000),
         initialValue = MapUiState(),
     )
+
+    init {
+        refreshBlocks()
+    }
 
     fun saveSettings(backendUrl: String, displayName: String, warningDistanceMeters: Int) {
         settings.setBackendUrl(backendUrl)
@@ -122,6 +151,67 @@ class MapViewModel @Inject constructor(
 
     fun clearRelationship(id: String) {
         settings.clearRelationship(id)
+    }
+
+    /**
+     * Hide this walker and be hidden from them.
+     *
+     * Unlike a relationship this goes to the server, because the point is that
+     * the other walker stops receiving our bearing at all. The server drops both
+     * of us from each other's map and pushes a fresh frame, so the marker goes
+     * away without waiting for the next fix.
+     */
+    fun block(walker: NearbyWalker) {
+        if (_blockState.value.isBusy) return
+        val token = authStore.accessToken() ?: return
+
+        _blockState.value = BlockState(isBusy = true)
+        viewModelScope.launch {
+            runCatching { blocksApi.block(token, walker.id, walker.name) }
+                .onSuccess {
+                    _blockState.value = BlockState()
+                    _blocked.value = (_blocked.value + BlockedWalker(walker.id, walker.name))
+                        .sortedBy { it.name.lowercase() }
+                    // A blocked dog must not linger in the friends list; the
+                    // relationship was about a walker we now want nothing to do with.
+                    settings.clearRelationship(walker.id)
+                }
+                .onFailure { _blockState.value = BlockState(failed = true) }
+        }
+    }
+
+    fun unblock(id: String) {
+        if (_blockState.value.isBusy) return
+        val token = authStore.accessToken() ?: return
+
+        _blockState.value = BlockState(isBusy = true)
+        viewModelScope.launch {
+            runCatching { blocksApi.unblock(token, id) }
+                .onSuccess {
+                    _blockState.value = BlockState()
+                    _blocked.value = _blocked.value.filterNot { it.id == id }
+                }
+                .onFailure { _blockState.value = BlockState(failed = true) }
+        }
+    }
+
+    fun clearBlockError() {
+        _blockState.value = _blockState.value.copy(failed = false)
+    }
+
+    /**
+     * Load the block list from the server.
+     *
+     * A failure is not surfaced: the list is only what settings displays, and the
+     * blocks the server already holds keep being enforced whether or not this
+     * call succeeds.
+     */
+    private fun refreshBlocks() {
+        val token = authStore.accessToken() ?: return
+        viewModelScope.launch {
+            runCatching { blocksApi.list(token) }
+                .onSuccess { _blocked.value = it }
+        }
     }
 
     fun signOut() {

@@ -304,6 +304,65 @@ Four things that will bite if changed carelessly:
    alert buzz twice. It was removed. The channel pattern also respects the user's
    per-channel settings and Do Not Disturb, which a direct call does not.
 
+## Blocking — the one social signal that is server-side
+
+Friend and disliked are local because they only change how a marker looks and
+sounds. A block cannot be: the point is that the other walker stops receiving
+your bearing at all, and only the server can stop sending it. So blocking is the
+one piece of the social graph that lives in Redis.
+
+Two keys per user, kept in step by `app/blocks.py`:
+
+| Key | Type | Holds |
+| --- | --- | --- |
+| `dogwalk:blocks:<id>` | hash | blocked id -> the name shown in settings |
+| `dogwalk:blocked_by:<id>` | set | ids that blocked this user |
+
+**Invisibility is symmetric.** `hidden_for()` returns the union of both, and
+`refresh_neighborhood()` drops those hits before building the frame. A one-way
+filter would leave the blocker on the blocked walker's map, which is the exact
+thing they blocked them to prevent. If you ever "simplify" this to a single key,
+you reintroduce that hole.
+
+The name is stored because the settings list has to name someone who is not
+walking right now, and the hub only knows the names of live connections. It is
+the same display name the server already broadcasts to everyone in range, so the
+copy exposes nothing new.
+
+Where it lives:
+
+| Concern | File |
+| --- | --- |
+| The two keys, `block` / `unblock` / `hidden_for` / `forget` | `backend/app/blocks.py` |
+| The filter, before the frame is built | `backend/app/proximity.py` |
+| `GET` / `POST` / `DELETE /blocks` | `backend/app/routes_blocks.py` |
+| `BlockedWalker`, `BlocksApi` | `model/Models.kt`, `data/blocks/BlocksApi.kt` |
+| Block action, blocked list, unblock | `ui/map/MapScreen.kt`, `ui/map/MapViewModel.kt` |
+
+Four things worth not undoing:
+
+1. **The filter is in `refresh_neighborhood`, not the client.** A client-side
+   filter would still send the bearing to the blocked walker's phone, which is
+   the thing the feature exists to prevent.
+2. **Block and unblock refresh both maps immediately.** `routes_blocks.py` calls
+   `refresh_neighborhood` for both walkers, so the marker goes away on the tap
+   rather than on the next GPS fix. It uses `refresh_neighborhood` rather than
+   `update_walker` on purpose: the latter also refreshes every neighbour, which
+   sends each of the two sockets the same frame twice. `last_neighbors` is left
+   stale, which costs one redundant refresh on the next fix and can never leak,
+   because every refresh filters against the hidden set of the walker it is sent
+   to.
+3. **Blocking clears the local relationship.** A blocked dog must not linger in
+   the friends list. Unblocking does not restore it; the mark was about a walker
+   you then wanted nothing to do with.
+4. **Account deletion calls `blocks.forget()`.** Without it, everyone who blocked
+   the deleted walker keeps a stale id and a name in their settings forever.
+
+Verified on the emulator against the local stack: 14 `PROXIMITY_ALERT` frames
+carrying the other walker, then nothing but `PROXIMITY_CLEAR` after the block;
+the settings list showed the blocked walker; unblocking brought them back; and
+the block was still enforced and still listed after `pm clear` (a reinstall).
+
 ## Authentication
 
 Accounts plus JWT. There is no anonymous mode: the app opens on a login screen

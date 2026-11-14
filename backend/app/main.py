@@ -12,6 +12,7 @@ from app.proximity import refresh_neighborhood
 from app.admin_ui import router as admin_ui_router
 from app.routes_admin import router as admin_router
 from app.routes_auth import router as auth_router
+from app.routes_blocks import router as blocks_router
 from app.ws import router as ws_router
 
 logger = logging.getLogger(__name__)
@@ -103,6 +104,7 @@ def create_app(
     app.include_router(auth_router)
     app.include_router(admin_router)
     app.include_router(admin_ui_router)
+    app.include_router(blocks_router)
     app.include_router(ws_router)
 
     if rate_limit is None:

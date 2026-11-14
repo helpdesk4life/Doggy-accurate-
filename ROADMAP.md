@@ -279,10 +279,12 @@ deploy mid-evening annoys someone.
 ## P3 — product ideas, not commitments
 
 - Walk history and stats (distance, duration, dogs met).
-- Block or mute a specific walker. Distinct from the friend groups above: marking
-  is local and only changes colour and sound, whereas blocking has to filter the
-  neighbour list server-side so the blocked walker stops receiving your bearing at
-  all. That is the version that makes someone feel safe, and it is still unbuilt.
+- ~~Block or mute a specific walker.~~ **Done** — and done the way that makes
+  someone feel safe: the filter is server-side, in `refresh_neighborhood`, so a
+  blocked walker never receives the bearing at all. Invisibility is symmetric
+  (blocking hides you from them too), the list lives in Redis so it survives a
+  reinstall, and `GET`/`POST`/`DELETE /blocks` is the API. Block from the
+  tap-a-dog dialog, unblock from settings. See **Blocking** in `HANDOFF.md`.
 - Report a walker.
 - Multiple dogs per account.
 - ~~Replace the raster OSM style with a proper vector style.~~ **Done** — the
@@ -309,11 +311,18 @@ class in `AppModule` — and ten tests pin the proximity bookkeeping (arrive onc
 not per fix; withdraw when the last dog leaves) and the three session-renewal
 branches (refresh, refusal, no token).
 
-If you would rather build something visible, **block a specific walker** (P3) is
-the natural sequel to friend groups: the marking UI and the settings list already
-exist, and the work is server-side filtering plus a `blocked` flag that survives
-reinstall. It is the smallest feature that makes the app feel safer to the person
-using it.
+**Blocking a walker is in.** The one social signal that could not stay on the
+device: `app/blocks.py` keeps a hash of who you blocked and a set of who blocked
+you, `refresh_neighborhood` drops the union before building the frame, and
+`GET`/`POST`/`DELETE /blocks` drives it. Symmetric on purpose — blocking hides
+you from them as well — and it survives a reinstall because it lives in Redis.
+Verified on the emulator, including after `pm clear`.
+
+The next visible thing is **walk history and stats** (P3): distance, duration and
+dogs met are all derivable from what the app already receives, and it is the
+first feature that gives a walk a reason to end. **Report a walker** is the other
+half of the safety story and would reuse the block plumbing — a report is a block
+plus a row an operator can read.
 
 ## Decisions I would like from you
 

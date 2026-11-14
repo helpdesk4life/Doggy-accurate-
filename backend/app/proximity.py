@@ -1,6 +1,6 @@
 """Proximity evaluation shared by the WebSocket handler and the expiry sweeper."""
 
-from app import config, geo, privacy
+from app import blocks, config, geo, privacy
 from app.hub import Hub
 from app.protocol import NearbyWalker, ProximityAlert, ProximityClear
 
@@ -21,8 +21,17 @@ async def refresh_neighborhood(
 
     Each neighbour is described relative to ``walker_id``: a quantised distance and
     bearing, never a coordinate. The exact positions stay in Redis.
+
+    Blocked walkers are dropped here, before the frame is built, so a block is
+    enforced by the server rather than by the client choosing not to draw a
+    marker. The filter is symmetric (see ``app.blocks``), which means a walker
+    who blocked someone also stops appearing on that person's map.
     """
     hits = await geo.nearby(redis, lat, lon, radius_m, exclude_id=walker_id)
+
+    hidden = await blocks.hidden_for(redis, walker_id)
+    if hidden:
+        hits = [hit for hit in hits if hit.walker_id not in hidden]
 
     if hits:
         alert = ProximityAlert(

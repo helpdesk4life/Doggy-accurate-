@@ -70,3 +70,17 @@ data class MarkedDog(
     val name: String,
     val relationship: DogRelationship,
 )
+
+/**
+ * A walker this user has blocked.
+ *
+ * Unlike [MarkedDog] this is server state, not device state: the backend keeps
+ * the list so the block survives a reinstall, and so it can stop sending either
+ * walker's bearing to the other. The name is captured when the block is made,
+ * because a blocked walker is usually not online when settings is opened.
+ */
+@Serializable
+data class BlockedWalker(
+    val id: String,
+    val name: String,
+)

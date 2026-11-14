@@ -34,6 +34,11 @@
     <string name="settings_disliked">Dogs yours does not like</string>
     <string name="settings_marked_empty">Tap a dog\'s name on the map to mark it.</string>
     <string name="settings_marked_remove">Remove %1$s</string>
+    <string name="settings_blocked_title">Blocked</string>
+    <string name="settings_blocked_group">Hidden from each other</string>
+    <string name="settings_blocked_empty">Nobody is blocked. Tap a dog on the map to block it.</string>
+    <string name="settings_blocked_unblock">Unblock %1$s</string>
+    <string name="settings_blocked_error">Could not update the block list. Check your connection and try again.</string>
     <string name="settings_save">Save</string>
     <string name="settings_cancel">Cancel</string>
 
@@ -94,4 +99,7 @@
     <string name="mark_disliked">Does not like</string>
     <string name="mark_clear">Not marked</string>
     <string name="mark_cancel">Cancel</string>
+    <string name="mark_block">Block this walker</string>
+    <string name="mark_block_hint">Blocking hides you from each other: they stop seeing you on their map, and you stop seeing them. Only you can undo it.</string>
+    <string name="mark_block_error">Could not block. Check your connection and try again.</string>
 </resources>

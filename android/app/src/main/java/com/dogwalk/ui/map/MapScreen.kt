@@ -6,6 +6,7 @@ import android.content.pm.PackageManager
 import android.os.Build
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.StringRes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
@@ -44,6 +45,7 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableStateOf
@@ -65,6 +67,7 @@ import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.dogwalk.R
 import com.dogwalk.data.SettingsStore
+import com.dogwalk.model.BlockedWalker
 import com.dogwalk.model.ConnectionState
 import com.dogwalk.model.DogRelationship
 import com.dogwalk.model.MarkedDog
@@ -75,6 +78,7 @@ import com.dogwalk.service.LocationTrackingService
 fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val deleteState by viewModel.deleteAccount.collectAsStateWithLifecycle()
+    val blockState by viewModel.blockState.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     var locationGranted by remember { mutableStateOf(hasLocationPermission(context)) }
@@ -163,12 +167,15 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
             initialWarningDistance = state.warningDistanceMeters,
             email = state.email,
             markedDogs = state.markedDogs,
+            blocked = state.blocked,
+            blockState = blockState,
             onDismiss = { showSettings = false },
             onSave = { url, name, warningDistance ->
                 viewModel.saveSettings(url, name, warningDistance)
                 showSettings = false
             },
             onClearRelationship = viewModel::clearRelationship,
+            onUnblock = viewModel::unblock,
             onSignOut = {
                 showSettings = false
                 viewModel.signOut()
@@ -180,10 +187,18 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
         )
     }
 
+    // A block lands asynchronously, so the dialog closes when the server has
+    // confirmed it rather than when the button was tapped.
+    LaunchedEffect(state.blocked, markTarget) {
+        val target = markTarget ?: return@LaunchedEffect
+        if (state.blocked.any { it.id == target.id }) markTarget = null
+    }
+
     markTarget?.let { walker ->
         MarkDogDialog(
             walker = walker,
             current = state.markedDogs[walker.id]?.relationship,
+            blockState = blockState,
             onSelect = { relationship ->
                 viewModel.setRelationship(walker.id, walker.name, relationship)
                 markTarget = null
@@ -192,7 +207,11 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                 viewModel.clearRelationship(walker.id)
                 markTarget = null
             },
-            onDismiss = { markTarget = null },
+            onBlock = { viewModel.block(walker) },
+            onDismiss = {
+                markTarget = null
+                viewModel.clearBlockError()
+            },
         )
     }
 
@@ -347,9 +366,12 @@ private fun SettingsDialog(
     initialWarningDistance: Int,
     email: String,
     markedDogs: Map<String, MarkedDog>,
+    blocked: List<BlockedWalker>,
+    blockState: BlockState,
     onDismiss: () -> Unit,
     onSave: (String, String, Int) -> Unit,
     onClearRelationship: (String) -> Unit,
+    onUnblock: (String) -> Unit,
     onSignOut: () -> Unit,
     onDeleteAccount: () -> Unit,
 ) {
@@ -416,19 +438,48 @@ private fun SettingsDialog(
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                     )
                 } else {
-                    MarkedDogGroup(
+                    NamedGroup(
                         title = stringResource(R.string.settings_friends),
-                        dogs = markedDogs.values.filter {
-                            it.relationship == DogRelationship.FRIEND
-                        },
+                        entries = markedDogs.values
+                            .filter { it.relationship == DogRelationship.FRIEND }
+                            .map { it.id to it.name },
+                        removeLabelRes = R.string.settings_marked_remove,
                         onRemove = onClearRelationship,
                     )
-                    MarkedDogGroup(
+                    NamedGroup(
                         title = stringResource(R.string.settings_disliked),
-                        dogs = markedDogs.values.filter {
-                            it.relationship == DogRelationship.DISLIKED
-                        },
+                        entries = markedDogs.values
+                            .filter { it.relationship == DogRelationship.DISLIKED }
+                            .map { it.id to it.name },
+                        removeLabelRes = R.string.settings_marked_remove,
                         onRemove = onClearRelationship,
+                    )
+                }
+
+                HorizontalDivider()
+                Text(
+                    text = stringResource(R.string.settings_blocked_title),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                if (blocked.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.settings_blocked_empty),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    NamedGroup(
+                        title = stringResource(R.string.settings_blocked_group),
+                        entries = blocked.map { it.id to it.name },
+                        removeLabelRes = R.string.settings_blocked_unblock,
+                        onRemove = onUnblock,
+                    )
+                }
+                if (blockState.failed) {
+                    Text(
+                        text = stringResource(R.string.settings_blocked_error),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
                     )
                 }
 
@@ -465,36 +516,40 @@ private fun SettingsDialog(
 }
 
 /**
- * One relationship group inside the settings sheet. Empty groups render nothing,
- * so the sheet does not grow two headings when only one kind is marked.
+ * One named group inside the settings sheet, as (id, name) pairs.
+ *
+ * Used for both the relationship groups and the block list: they differ only in
+ * the wording of the remove button. Empty groups render nothing, so the sheet
+ * does not grow headings for lists that have nothing in them.
  */
 @Composable
-private fun MarkedDogGroup(
+private fun NamedGroup(
     title: String,
-    dogs: List<MarkedDog>,
+    entries: List<Pair<String, String>>,
+    @StringRes removeLabelRes: Int,
     onRemove: (String) -> Unit,
 ) {
-    if (dogs.isEmpty()) return
+    if (entries.isEmpty()) return
 
     Text(
         text = title,
         style = MaterialTheme.typography.bodySmall,
         color = MaterialTheme.colorScheme.onSurfaceVariant,
     )
-    dogs.sortedBy { it.name.lowercase() }.forEach { dog ->
+    entries.sortedBy { it.second.lowercase() }.forEach { (id, name) ->
         Row(
             modifier = Modifier.fillMaxWidth(),
             verticalAlignment = Alignment.CenterVertically,
         ) {
             Text(
-                text = dog.name,
+                text = name,
                 style = MaterialTheme.typography.bodyMedium,
                 modifier = Modifier.weight(1f),
             )
-            IconButton(onClick = { onRemove(dog.id) }) {
+            IconButton(onClick = { onRemove(id) }) {
                 Icon(
                     imageVector = Icons.Outlined.Close,
-                    contentDescription = stringResource(R.string.settings_marked_remove, dog.name),
+                    contentDescription = stringResource(removeLabelRes, name),
                 )
             }
         }
@@ -502,17 +557,21 @@ private fun MarkedDogGroup(
 }
 
 /**
- * Mark a neighbour as liked or disliked.
+ * Mark a neighbour as liked or disliked, or block them.
  *
  * The relationship is stored on this device only. Nothing about it is sent to the
- * server, so the social graph cannot leak from the backend.
+ * server, so the social graph cannot leak from the backend. Blocking is the
+ * exception and is deliberately set apart: it goes to the server, because the
+ * point of it is that the other walker stops receiving our bearing.
  */
 @Composable
 private fun MarkDogDialog(
     walker: NearbyWalker,
     current: DogRelationship?,
+    blockState: BlockState,
     onSelect: (DogRelationship) -> Unit,
     onClear: () -> Unit,
+    onBlock: () -> Unit,
     onDismiss: () -> Unit,
 ) {
     AlertDialog(
@@ -541,6 +600,30 @@ private fun MarkDogDialog(
                     ),
                 ) {
                     Text(stringResource(R.string.mark_disliked))
+                }
+
+                HorizontalDivider()
+                Text(
+                    text = stringResource(R.string.mark_block_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(
+                    onClick = onBlock,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !blockState.isBusy,
+                ) {
+                    Text(
+                        text = stringResource(R.string.mark_block),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                if (blockState.failed) {
+                    Text(
+                        text = stringResource(R.string.mark_block_error),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
                 }
             }
         },
