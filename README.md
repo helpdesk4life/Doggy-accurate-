@@ -371,14 +371,18 @@ The APK lands in `app/build/outputs/apk/debug/app-debug.apk`.
 
 ### Pointing the app at the backend
 
-The default is `wss://10.0.2.2:8443/ws/walk` — the host machine as seen from the
-Android emulator, through the Caddy TLS terminator. The debug build trusts the
-local CA, so this works out of the box.
+The default is `wss://backend.thomasfeyens.be/ws/walk` — the VPS, where Caddy
+terminates TLS with a Let's Encrypt certificate. Release builds trust that with
+the system store, so no custom CA is needed.
 
-On a physical phone, open the settings sheet in the app (gear icon) and set the
-URL to your machine's LAN address, e.g. `wss://192.168.1.20:8443/ws/walk`. You
-will also need to add that address to the Caddyfile site line and to
-`default_sni`, and re-export the CA. The value is persisted.
+For local development, open the settings sheet in the app (gear icon) and set
+the URL to `wss://10.0.2.2:8443/ws/walk` — the host machine as seen from the
+Android emulator, through the Caddy TLS terminator in `backend/docker-compose.yml`.
+Only the debug build trusts Caddy's local CA, so this works out of the box in a
+debug APK. On a physical phone against your own machine, use the machine's LAN
+address instead, e.g. `wss://192.168.1.20:8443/ws/walk`, add that address to the
+Caddyfile site line and to `default_sni`, and re-export the CA. The value is
+persisted.
 
 ### Release signing
 

@@ -30,12 +30,13 @@ android {
         versionCode = 1
         versionName = "1.0"
 
-        // 10.0.2.2 is the host machine as seen from the Android emulator, and 8443
-        // is the Caddy TLS terminator in backend/docker-compose.yml. The debug build
-        // trusts Caddy's local CA (src/debug/res/raw/caddy_root.crt), so this works
-        // out of the box; a release build needs a real certificate for a real host.
-        // Override at runtime from the in-app settings sheet for a physical device.
-        buildConfigField("String", "DEFAULT_BACKEND_URL", "\"wss://10.0.2.2:8443/ws/walk\"")
+        // Production: the VPS backend. Caddy terminates TLS there with a Let's
+        // Encrypt certificate, so a release build trusts it with the system store
+        // and needs no custom CA and no cleartext. For local development, point the
+        // in-app settings sheet at wss://10.0.2.2:8443/ws/walk instead — 10.0.2.2 is
+        // the host as seen from the Android emulator, and only the debug build
+        // trusts Caddy's local CA (src/debug/res/xml/network_security_config.xml).
+        buildConfigField("String", "DEFAULT_BACKEND_URL", "\"wss://backend.thomasfeyens.be/ws/walk\"")
     }
 
     signingConfigs {
