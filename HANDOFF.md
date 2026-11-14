@@ -1001,13 +1001,13 @@ next person meets it as a passing test rather than a mystery failure.
   a code can still probe addresses, and a leaked code is a leaked invitation.
   Email verification is the general fix; until then keep `INVITE_REQUIRED=1` and
   mint codes one at a time.
-- **Reset emails need SMTP credentials to actually arrive.** `app/email.py` has a
-  real `SmtpEmailSender` behind `EMAIL_SENDER=smtp`, so the code path is written
-  and tested; what is missing is a provider account. Until `SMTP_HOST` and
-  `SMTP_FROM` are set, the VPS runs `EMAIL_SENDER=logging` with
-  `ALLOW_LOGGING_EMAIL=1` and reset codes land in `docker compose logs backend`.
-  Switching to `smtp` without those two is a boot failure, not a silent fallback —
-  see `Settings.validate()`.
+- **Reset emails need SMTP credentials to actually arrive.** The code path is
+  finished: `SmtpEmailSender` behind `EMAIL_SENDER=smtp`, plus an **Email** page in
+  the admin panel (`/admin/ui/smtp`) that stores a configuration in Redis, rebuilds
+  the running sender in place, and sends a test message through the values on
+  screen before you commit to them. What is missing is a provider account. Until
+  one is saved, the VPS runs `EMAIL_SENDER=logging` with `ALLOW_LOGGING_EMAIL=1`
+  and reset codes land in `docker compose logs backend`.
 - ~~**The admin panel has no second gate.**~~ Closed: `deploy/Caddyfile` puts
   Caddy `basic_auth` on `/admin*` (user `thomas`) ahead of the app's own login, and
   an unauthenticated request gets 401. The hash is bcrypt — rotate it with

@@ -26,7 +26,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from app import admin, auth, invites, users
+from app import admin, auth, config, email, invites, smtp_settings, users
 from app.routes_admin import EMAIL_PATTERN
 
 router = APIRouter(prefix="/admin/ui", tags=["admin-ui"], include_in_schema=False)
@@ -368,3 +368,198 @@ async def audit_page(request: Request):
             "entries": await admin.recent(request.app.state.redis, 100),
         },
     )
+
+
+# --- outbound email -------------------------------------------------------
+
+
+async def _smtp_context(redis, operator: dict, candidate) -> dict:
+    """Everything the email page needs, including what is actually in use."""
+    stored = await smtp_settings.load(redis)
+    resolved = await smtp_settings.resolve(redis, config.settings)
+
+    if stored is not None:
+        source = "panel"
+    elif config.settings.email_sender == "smtp":
+        source = "environment"
+    else:
+        source = "none"
+
+    return {
+        "admin": operator,
+        "page": "smtp",
+        # A plain dict without the password: the secret never enters the template
+        # context, so no future edit to the page can render it by accident.
+        "form": {
+            "host": candidate.host,
+            "port": candidate.port,
+            "sender": candidate.sender,
+            "username": candidate.username,
+            "security": candidate.security,
+        },
+        "has_password": bool(candidate.password),
+        "source": source,
+        "active": resolved is not None,
+        "active_host": resolved.host if resolved is not None else "",
+        "error": None,
+        "notice": None,
+    }
+
+
+def _smtp_page(request: Request, context: dict, status_code: int = 200):
+    return _page(request, "smtp", context, status_code=status_code)
+
+
+@router.get("/smtp", response_class=HTMLResponse)
+async def smtp_page(request: Request, saved: int = 0):
+    operator = await _current(request)
+    if operator is None:
+        return _to_login()
+
+    redis = request.app.state.redis
+    stored = await smtp_settings.load(redis)
+    candidate = stored if stored is not None else smtp_settings.from_settings(config.settings)
+
+    context = await _smtp_context(redis, operator, candidate)
+    if saved:
+        context["notice"] = "Saved. Password-reset codes use this server from now on."
+    return _smtp_page(request, context)
+
+
+def _submitted(
+    stored, host: str, port: str, security: str, username: str, password: str, sender: str
+) -> tuple[smtp_settings.SmtpConfig, str | None]:
+    """Turn the form into a configuration, plus a complaint if the port is not a number.
+
+    A bad port still yields a configuration, so the page can redraw with what was
+    typed instead of wiping the form.
+    """
+    try:
+        port_number = int(port)
+        problem = None
+    except ValueError:
+        port_number = 587
+        problem = "The port must be a number."
+
+    return (
+        smtp_settings.SmtpConfig(
+            host=host.strip(),
+            port=port_number,
+            sender=sender.strip(),
+            username=username.strip(),
+            # Blank means "keep the stored one", so the form never has to carry
+            # the secret back to the browser to be able to save again.
+            password=password or (stored.password if stored is not None else ""),
+            security=security,
+        ),
+        problem,
+    )
+
+
+@router.post("/smtp")
+async def smtp_submit(
+    request: Request,
+    action: str = Form("save"),
+    host: str = Form(""),
+    port: str = Form("587"),
+    security: str = Form("starttls"),
+    username: str = Form(""),
+    password: str = Form(""),
+    sender: str = Form(""),
+    test_to: str = Form(""),
+):
+    """Save the configuration, or send one test message through it.
+
+    One form with two buttons rather than two forms: the test has to run against
+    the values on screen, and duplicating eight fields is how the two drift.
+    """
+    operator = await _current(request)
+    if operator is None:
+        return _to_login()
+
+    redis = request.app.state.redis
+    stored = await smtp_settings.load(redis)
+    candidate, problem = _submitted(stored, host, port, security, username, password, sender)
+
+    if problem is not None:
+        context = await _smtp_context(redis, operator, candidate)
+        context["error"] = problem
+        return _smtp_page(request, context, status_code=400)
+
+    if action == "test":
+        return await _smtp_test(request, operator, candidate, test_to)
+
+    problem = candidate.problem()
+    if problem is not None:
+        context = await _smtp_context(redis, operator, candidate)
+        context["error"] = problem
+        return _smtp_page(request, context, status_code=400)
+
+    await smtp_settings.save(redis, candidate)
+    await email.refresh(request.app)
+    await admin.record(
+        redis,
+        operator,
+        "smtp_saved",
+        target=candidate.host,
+        detail=f"{candidate.sender} via {candidate.security}",
+    )
+    return RedirectResponse("/admin/ui/smtp?saved=1", status_code=303)
+
+
+async def _smtp_test(request: Request, operator: dict, candidate, test_to: str):
+    """Send one message through the values on screen, without saving them."""
+    redis = request.app.state.redis
+    recipient = test_to.strip()
+
+    if not _EMAIL_RE.match(recipient):
+        context = await _smtp_context(redis, operator, candidate)
+        context["error"] = "Enter an address to send the test to."
+        return _smtp_page(request, context, status_code=400)
+
+    problem = candidate.problem()
+    if problem is not None:
+        context = await _smtp_context(redis, operator, candidate)
+        context["error"] = problem
+        return _smtp_page(request, context, status_code=400)
+
+    sender = email.SmtpEmailSender(
+        host=candidate.host,
+        port=candidate.port,
+        sender=candidate.sender,
+        username=candidate.username,
+        password=candidate.password,
+        security=candidate.security,
+        timeout=candidate.timeout,
+    )
+    try:
+        await sender.send(
+            to=recipient,
+            subject="DogWalk SMTP test",
+            body=email.test_email_body(candidate.host),
+        )
+    except Exception as error:
+        await admin.record(
+            redis, operator, "smtp_test", target=recipient, detail=f"failed: {type(error).__name__}"
+        )
+        context = await _smtp_context(redis, operator, candidate)
+        context["error"] = f"{type(error).__name__}: {error}"
+        return _smtp_page(request, context, status_code=400)
+
+    await admin.record(redis, operator, "smtp_test", target=recipient, detail="delivered")
+    context = await _smtp_context(redis, operator, candidate)
+    context["notice"] = f"Test message sent to {recipient} through {candidate.host}."
+    return _smtp_page(request, context)
+
+
+@router.post("/smtp/clear")
+async def smtp_clear(request: Request):
+    operator = await _current(request)
+    if operator is None:
+        return _to_login()
+
+    redis = request.app.state.redis
+    await smtp_settings.clear(redis)
+    await email.refresh(request.app)
+    await admin.record(redis, operator, "smtp_cleared")
+    return RedirectResponse("/admin/ui/smtp", status_code=303)

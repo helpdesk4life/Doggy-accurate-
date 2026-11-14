@@ -1,0 +1,74 @@
+{% extends "admin/base.html" %}
+{% block title %}Email · DogWalk admin{% endblock %}
+{% block content %}
+<h1>Email</h1>
+<p class="lede">Password-reset codes go out by email. Point this at a provider and they stop landing in the log.</p>
+
+{% if error %}
+<div class="notice error"><p><strong>{{ error }}</strong></p></div>
+{% endif %}
+{% if notice %}
+<div class="notice"><p>{{ notice }}</p></div>
+{% endif %}
+
+{% if active %}
+<div class="notice">
+  <h2>Sending through {{ active_host }}</h2>
+  <p class="muted">Reset codes leave the server as mail. Nothing is written to the log.</p>
+</div>
+{% else %}
+<div class="notice error">
+  <h2>Nothing configured</h2>
+  <p class="muted">Reset codes are written to the backend log, where anyone who can read it can use them.</p>
+</div>
+{% endif %}
+
+<form method="post" action="/admin/ui/smtp" class="stack">
+  <label for="host">Server host</label>
+  <input id="host" name="host" class="field" value="{{ form.host }}" placeholder="smtp.resend.com" autocomplete="off">
+
+  <label for="port">Port</label>
+  <input id="port" name="port" type="number" min="1" max="65535" class="field" value="{{ form.port }}">
+
+  <label for="security">Security</label>
+  <select id="security" name="security" class="field">
+    <option value="starttls" {{ 'selected' if form.security == 'starttls' else '' }}>starttls — port 587</option>
+    <option value="ssl" {{ 'selected' if form.security == 'ssl' else '' }}>ssl — port 465</option>
+    <option value="none" {{ 'selected' if form.security == 'none' else '' }}>none — a relay on this host</option>
+  </select>
+
+  <label for="username">Username</label>
+  <input id="username" name="username" class="field" value="{{ form.username }}" autocomplete="off">
+
+  <label for="password">Password</label>
+  <input id="password" name="password" type="password" class="field" value="" autocomplete="new-password"
+         placeholder="{{ 'unchanged' if has_password else 'provider API key' }}">
+  <p class="small muted">
+    {% if has_password %}A password is stored. Leave this blank to keep it.{% else %}Stored as typed and never shown again.{% endif %}
+  </p>
+
+  <label for="sender">Sender address</label>
+  <input id="sender" name="sender" class="field" value="{{ form.sender }}"
+         placeholder="DogWalk &lt;no-reply@yourdomain.example&gt;" autocomplete="off">
+
+  <label for="test_to">Send a test to</label>
+  <input id="test_to" name="test_to" class="field" value="" placeholder="you@example.com" autocomplete="off">
+
+  <div class="row" style="margin-top:1rem">
+    <button class="primary" type="submit" name="action" value="save">Save</button>
+    <button type="submit" name="action" value="test">Send test</button>
+  </div>
+</form>
+
+{% if source == 'environment' %}
+<p class="small muted" style="margin-top:1.5rem">
+  These values come from the <span class="mono">SMTP_*</span> environment variables. Saving here overrides them.
+</p>
+{% endif %}
+
+{% if source == 'panel' %}
+<form method="post" action="/admin/ui/smtp/clear" style="margin-top:1.5rem">
+  <button class="danger" type="submit">Forget this configuration</button>
+</form>
+{% endif %}
+{% endblock %}

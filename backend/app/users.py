@@ -36,6 +36,10 @@ CREATED_INDEX_KEY = "dogwalk:users:created"
 REFRESH_KEY = "dogwalk:refresh:{jti}"
 USED_REFRESH_KEY = "dogwalk:refresh:used:{jti}"
 RESET_KEY = "dogwalk:reset:{digest}"
+# The reset key is a digest of email+code, so it cannot be found from the address
+# alone. This set is what makes the codes deletable: without it, deleting an
+# account leaves every code it was ever sent alive until its TTL runs out.
+RESET_INDEX_KEY = "dogwalk:reset:index:{email}"
 RESET_ATTEMPT_KEY = "dogwalk:reset:attempts:{email}"
 LOGIN_FAIL_KEY = "dogwalk:loginfail:{email}"
 
@@ -227,12 +231,21 @@ async def delete_user(redis, user_id: str) -> None:
     await blocks.forget(redis, user_id)
 
     jtis = await redis.smembers(REFRESH_INDEX_KEY.format(user_id=user_id))
+    # Any reset code still in flight dies with the account. Without this the code
+    # outlives the account it belongs to, and confirming it writes a password
+    # hash for a user that no longer exists.
+    digests = await redis.smembers(RESET_INDEX_KEY.format(email=user["email"]))
     async with redis.pipeline(transaction=True) as pipe:
         for jti in jtis:
             if isinstance(jti, bytes):
                 jti = jti.decode()
             pipe.delete(REFRESH_KEY.format(jti=jti))
+        for digest in digests:
+            if isinstance(digest, bytes):
+                digest = digest.decode()
+            pipe.delete(RESET_KEY.format(digest=digest))
         pipe.delete(REFRESH_INDEX_KEY.format(user_id=user_id))
+        pipe.delete(RESET_INDEX_KEY.format(email=user["email"]))
         pipe.delete(USER_KEY.format(user_id=user_id))
         pipe.delete(EMAIL_KEY.format(email=user["email"]))
         pipe.delete(LOGIN_FAIL_KEY.format(email=user["email"]))
@@ -314,9 +327,15 @@ async def create_reset_code(redis, email: str) -> str:
     Only the hash is stored, so a Redis dump does not hand out working codes.
     """
     code = f"{secrets.randbelow(1_000_000):06d}"
-    key = RESET_KEY.format(digest=_reset_digest(email, code))
-    await redis.hset(key, mapping={"email": normalise_email(email)})
-    await redis.expire(key, RESET_TTL_SECONDS)
+    digest = _reset_digest(email, code)
+    key = RESET_KEY.format(digest=digest)
+    index = RESET_INDEX_KEY.format(email=normalise_email(email))
+    async with redis.pipeline(transaction=True) as pipe:
+        pipe.hset(key, mapping={"email": normalise_email(email)})
+        pipe.expire(key, RESET_TTL_SECONDS)
+        pipe.sadd(index, digest)
+        pipe.expire(index, RESET_TTL_SECONDS)
+        await pipe.execute()
     return code
 
 
@@ -341,6 +360,7 @@ async def consume_reset_code(redis, email: str, code: str) -> str | None:
         return None
 
     await redis.delete(key)
+    await redis.srem(RESET_INDEX_KEY.format(email=email), _reset_digest(email, code))
     await redis.delete(attempt_key)
 
     user = await get_by_email(redis, email)

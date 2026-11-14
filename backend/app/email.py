@@ -6,9 +6,11 @@ testable without a provider; it is refused outside development, because a reset
 code in a log is a working account takeover for anyone who can read that log.
 See ``Settings.validate()``.
 
-To go live, set ``EMAIL_SENDER=smtp`` and fill in the ``SMTP_*`` variables. Any
-provider that speaks SMTP works — Resend, Postmark, Mailgun, Fastmail, a local
-relay — so there is no provider-specific code to write.
+To go live, either set ``EMAIL_SENDER=smtp`` and fill in the ``SMTP_*`` variables,
+or fill in the form at ``/admin/ui/smtp``. The panel wins when it holds a usable
+configuration, and saving there takes effect on the next send without a restart.
+Any provider that speaks SMTP works — Resend, Postmark, Mailgun, Fastmail, a
+local relay — so there is no provider-specific code to write.
 """
 
 import asyncio
@@ -18,7 +20,7 @@ import ssl
 from email.message import EmailMessage
 from typing import Protocol
 
-from app import config
+from app import config, smtp_settings
 
 logger = logging.getLogger(__name__)
 
@@ -110,10 +112,46 @@ def build_sender(name: str, settings: config.Settings | None = None) -> EmailSen
     raise RuntimeError(f"Unknown EMAIL_SENDER {name!r}. Known senders: logging, smtp.")
 
 
+async def build_runtime_sender(redis, settings: config.Settings) -> EmailSender:
+    """The sender to use now.
+
+    A configuration saved in the admin panel beats the environment, so an
+    operator can switch the deployment from the log to a real provider without
+    editing `.env` or restarting. With nothing saved, this is exactly
+    ``build_sender(settings.email_sender)``.
+    """
+    stored = await smtp_settings.resolve(redis, settings)
+    if stored is None:
+        return build_sender(settings.email_sender, settings)
+    return SmtpEmailSender(
+        host=stored.host,
+        port=stored.port,
+        sender=stored.sender,
+        username=stored.username,
+        password=stored.password,
+        security=stored.security,
+        timeout=stored.timeout,
+    )
+
+
+async def refresh(app) -> None:
+    """Rebuild ``app.state.email_sender`` after the configuration changed."""
+    app.state.email_sender = await build_runtime_sender(app.state.redis, config.settings)
+
+
 def reset_email_body(code: str, ttl_minutes: int) -> str:
     return (
         "Someone asked to reset the password for your DogWalk account.\n\n"
         f"Your code is: {code}\n\n"
         f"It expires in {ttl_minutes} minutes and can only be used once.\n"
         "If this was not you, ignore this message; your password has not changed.\n"
+    )
+
+
+def test_email_body(host: str) -> str:
+    return (
+        "This is a test message from the DogWalk admin panel.\n\n"
+        f"It was sent through {host}, which is the server the panel is now "
+        "configured to use. If you are reading it, password-reset codes will "
+        "arrive the same way.\n"
     )

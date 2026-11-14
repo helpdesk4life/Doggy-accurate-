@@ -23,7 +23,7 @@ every admin, so it records *that* codes were minted, never the codes.
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
-from app import admin, auth, invites, users
+from app import admin, auth, config, email, invites, smtp_settings, users
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -116,6 +116,45 @@ class AuditEntry(BaseModel):
 
 class AuditPage(BaseModel):
     entries: list[AuditEntry]
+
+
+class SmtpSettings(BaseModel):
+    """The SMTP configuration as the panel edits it.
+
+    ``password`` is write-only. An empty value on save means "keep the stored
+    one", which is what lets the form redraw without ever carrying the secret
+    back to the browser.
+    """
+
+    host: str = Field(default="", max_length=253)
+    port: int = Field(default=587, ge=1, le=65535)
+    username: str = Field(default="", max_length=254)
+    password: str = Field(default="", max_length=512)
+    sender: str = Field(default="", max_length=254)
+    security: str = Field(default="starttls")
+
+
+class SmtpSettingsView(BaseModel):
+    host: str
+    port: int
+    username: str
+    sender: str
+    security: str
+    has_password: bool
+    # "panel" when an operator saved a configuration, "environment" when it comes
+    # from SMTP_* variables, "none" when neither is set up.
+    source: str
+    # Whether a real sender is in use right now, as opposed to the log.
+    active: bool
+
+
+class SmtpTestRequest(SmtpSettings):
+    to: str = Field(min_length=3, max_length=254, pattern=EMAIL_PATTERN)
+
+
+class SmtpTestResult(BaseModel):
+    ok: bool
+    detail: str
 
 
 def _redis(request: Request):
@@ -315,3 +354,137 @@ async def audit_log(
 ) -> AuditPage:
     entries = await admin.recent(_redis(request), limit)
     return AuditPage(entries=[AuditEntry(**entry) for entry in entries])
+
+
+# --- outbound email -------------------------------------------------------
+
+
+def _smtp_config(
+    body: SmtpSettings, stored: smtp_settings.SmtpConfig | None
+) -> smtp_settings.SmtpConfig:
+    """The submitted values, with the stored password when the field was blank."""
+    return smtp_settings.SmtpConfig(
+        host=body.host.strip(),
+        port=body.port,
+        sender=body.sender.strip(),
+        username=body.username.strip(),
+        password=body.password or (stored.password if stored is not None else ""),
+        security=body.security,
+    )
+
+
+@router.get("/smtp", response_model=SmtpSettingsView)
+async def read_smtp(
+    request: Request,
+    _operator: dict = Depends(require_admin),
+) -> SmtpSettingsView:
+    """What the panel should show. Never the password, only whether one is set."""
+    redis = _redis(request)
+    stored = await smtp_settings.load(redis)
+    environment = smtp_settings.from_settings(config.settings)
+
+    if stored is not None:
+        source, shown = "panel", stored
+    elif config.settings.email_sender == "smtp":
+        source, shown = "environment", environment
+    else:
+        source, shown = "none", environment
+
+    return SmtpSettingsView(
+        host=shown.host,
+        port=shown.port,
+        username=shown.username,
+        sender=shown.sender,
+        security=shown.security,
+        has_password=bool(shown.password),
+        source=source,
+        active=await smtp_settings.resolve(redis, config.settings) is not None,
+    )
+
+
+@router.put("/smtp", response_model=SmtpSettingsView)
+async def save_smtp(
+    body: SmtpSettings,
+    request: Request,
+    operator: dict = Depends(require_admin),
+) -> SmtpSettingsView:
+    """Store a configuration and switch the running sender to it.
+
+    The rebuild is what makes this useful: the next password-reset email goes
+    through the new server without a restart.
+    """
+    redis = _redis(request)
+    candidate = _smtp_config(body, await smtp_settings.load(redis))
+
+    problem = candidate.problem()
+    if problem is not None:
+        raise HTTPException(status_code=400, detail=problem)
+
+    await smtp_settings.save(redis, candidate)
+    await email.refresh(request.app)
+    await admin.record(
+        redis,
+        operator,
+        "smtp_saved",
+        target=candidate.host,
+        detail=f"{candidate.sender} via {candidate.security}",
+    )
+    return await read_smtp(request, operator)
+
+
+@router.delete("/smtp", status_code=204)
+async def clear_smtp(
+    request: Request,
+    operator: dict = Depends(require_admin),
+) -> Response:
+    """Forget the stored configuration and fall back to EMAIL_SENDER."""
+    redis = _redis(request)
+    await smtp_settings.clear(redis)
+    await email.refresh(request.app)
+    await admin.record(redis, operator, "smtp_cleared")
+    return Response(status_code=204)
+
+
+@router.post("/smtp/test", response_model=SmtpTestResult)
+async def test_smtp(
+    body: SmtpTestRequest,
+    request: Request,
+    operator: dict = Depends(require_admin),
+) -> SmtpTestResult:
+    """Send one message through the submitted configuration, without saving it.
+
+    Testing before saving is the point: a wrong port or a rejected sender is
+    something to find out here, not by breaking password reset for everyone.
+    """
+    redis = _redis(request)
+    candidate = _smtp_config(body, await smtp_settings.load(redis))
+
+    problem = candidate.problem()
+    if problem is not None:
+        return SmtpTestResult(ok=False, detail=problem)
+
+    sender = email.SmtpEmailSender(
+        host=candidate.host,
+        port=candidate.port,
+        sender=candidate.sender,
+        username=candidate.username,
+        password=candidate.password,
+        security=candidate.security,
+        timeout=candidate.timeout,
+    )
+    try:
+        await sender.send(
+            to=body.to,
+            subject="DogWalk SMTP test",
+            body=email.test_email_body(candidate.host),
+        )
+    except Exception as error:
+        # The message is the useful part: "connection refused" and "authentication
+        # failed" send an operator to different places.
+        await admin.record(
+            redis, operator, "smtp_test", target=body.to, detail=f"failed: {type(error).__name__}"
+        )
+        return SmtpTestResult(ok=False, detail=f"{type(error).__name__}: {error}")
+
+    await admin.record(redis, operator, "smtp_test", target=body.to, detail="delivered")
+    return SmtpTestResult(ok=True, detail=f"Sent to {body.to} through {candidate.host}.")

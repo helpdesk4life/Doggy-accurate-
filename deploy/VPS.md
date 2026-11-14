@@ -253,7 +253,21 @@ you wire up a real email provider.
 ### Switching reset emails to SMTP
 
 `app/email.py` has a real `SmtpEmailSender`, so this is credentials rather than
-code. Any provider that speaks SMTP works. Replace the `ALLOW_LOGGING_EMAIL` line
+code. Any provider that speaks SMTP works.
+
+**The easy way: the panel.** Sign in at `https://backend.thomasfeyens.be/admin/ui`,
+open **Email**, fill in the server, port, security, username, password and sender
+address, put your own address in "Send a test to", and press **Send test**. The
+message goes out through the values on screen without saving them, so a wrong
+port costs you nothing. When it arrives, press **Save** — the running sender is
+rebuilt in place and the next reset email uses it. No restart, no `.env` edit.
+
+Leave `ALLOW_LOGGING_EMAIL=1` in the `.env`. `Settings.validate()` reads only the
+environment, so it cannot see a configuration saved in the panel and would still
+refuse to boot without the acknowledgement — even though the panel's sender is
+the one actually in use.
+
+**The other way: environment variables.** Replace the `ALLOW_LOGGING_EMAIL` line
 in `~/dog/backend/.env` with:
 
 ```bash
@@ -268,9 +282,10 @@ SMTP_SECURITY=starttls
 
 then `docker compose up -d backend`. **Do not set `EMAIL_SENDER=smtp` without
 `SMTP_HOST` and `SMTP_FROM`** — `Settings.validate()` refuses to boot, so the
-container restart-loops instead of quietly falling back to the log. Check with
-`docker compose logs backend | head` and a real reset request; the code should
-arrive by mail and *not* appear in the log.
+container restart-loops instead of quietly falling back to the log.
+
+Either way, check with a real reset request: the code should arrive by mail and
+*not* appear in `docker compose logs backend`.
 
 ### First operator account and the first invite code
 

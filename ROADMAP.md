@@ -273,11 +273,12 @@ deploy mid-evening annoys someone.
   holding a code can still probe, and a leaked code is a leaked invitation. Email
   verification is the general fix and would let the gate come off.
 - **Reset codes still go to the log on the VPS.** The sender is written —
-  `SmtpEmailSender` behind `EMAIL_SENDER=smtp` — but there are no SMTP credentials
-  yet, so the deployment runs `EMAIL_SENDER=logging` with `ALLOW_LOGGING_EMAIL=1`
-  and `Settings.validate()` lets it through. Until `SMTP_HOST`/`SMTP_FROM` are set,
-  that acknowledgement is the only thing standing between a log reader and any
-  account.
+  `SmtpEmailSender` behind `EMAIL_SENDER=smtp` — and the admin panel has an
+  **Email** page that saves a configuration, rebuilds the sender without a restart
+  and sends a test message first. But no provider account exists yet, so the
+  deployment runs `EMAIL_SENDER=logging` with `ALLOW_LOGGING_EMAIL=1` and
+  `Settings.validate()` lets it through. Until someone fills in that page, the
+  acknowledgement is the only thing standing between a log reader and any account.
 
 ## P3 — product ideas, not commitments
 
@@ -351,7 +352,7 @@ New ones, none of which block anything today:
 1. ~~**Email provider**~~ → **SMTP, provider-agnostic.** `SmtpEmailSender` speaks
    plain SMTP, so Resend, Postmark, Mailgun, Fastmail or a local relay all work
    without a code change. What is left is picking one and pasting the credentials
-   into the VPS `.env`.
+   into the panel's **Email** page.
 2. **Do you want email verification?** The enumeration gap is closed by invite
    codes, so this is no longer a security fix — it is what would let the gate come
    off and the app open to strangers. It adds a second email flow and a "not yet

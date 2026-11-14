@@ -85,7 +85,11 @@ def create_app(
             decode_responses=True,
         )
         app.state.hub = Hub()
-        app.state.email_sender = email.build_sender(config.settings.email_sender)
+        # Reads the admin panel's saved configuration, so a provider set up there
+        # survives a restart. Falls back to EMAIL_SENDER when nothing is saved.
+        app.state.email_sender = await email.build_runtime_sender(
+            app.state.redis, config.settings
+        )
         task = asyncio.create_task(sweep_loop(app))
         try:
             yield

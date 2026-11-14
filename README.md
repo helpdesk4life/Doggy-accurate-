@@ -122,6 +122,19 @@ loop, and a failed send is logged rather than raised: a 500 for a known address
 and a 202 for an unknown one would be the account enumeration oracle the endpoint
 is built to avoid.
 
+**Or configure it in the panel instead.** `/admin/ui/smtp` has the same fields
+plus a "Send test" button that posts one message through the values on screen
+without saving them. Saving stores the configuration in Redis and rebuilds the
+sender in place, so the next reset email goes through the new server with no
+restart and no `.env` edit. A saved configuration wins over `EMAIL_SENDER`, which
+means the panel works on a deployment that still says `EMAIL_SENDER=logging`.
+Keep `ALLOW_LOGGING_EMAIL=1` there: `Settings.validate()` reads only the
+environment, so it cannot see a configuration saved in the panel and would still
+refuse to boot without the acknowledgement. The password is write-only: it is
+never returned by the API, never rendered into the page, and never written to the
+audit log. "Forget this configuration" drops it and falls back to the
+environment.
+
 ### Tests
 
 ```bash
@@ -251,11 +264,12 @@ cleared and the UI falls back to the login screen.
 
 ## Admin
 
-A web panel for accounts and invite codes, at `/admin/ui`. It is deliberately
-narrow: it can see who is registered, create an account, sign one out, delete
-one, and mint invite codes. It cannot see where anyone is — nothing in
-`app/routes_admin.py` or `app/admin_ui.py` reads the geo index, and
-`test_admin.py` asserts that no admin response contains a position field.
+A web panel for accounts, invite codes and outbound email, at `/admin/ui`. It is
+deliberately narrow: it can see who is registered, create an account, sign one
+out, delete one, mint invite codes, and point the deployment at an SMTP server.
+It cannot see where anyone is — nothing in `app/routes_admin.py` or
+`app/admin_ui.py` reads the geo index, and `test_admin.py` asserts that no admin
+response contains a position field.
 
 ### Creating an account
 
@@ -324,6 +338,25 @@ The HTML pages authenticate with an HttpOnly, `SameSite=Strict` cookie scoped to
 `/admin`, because a browser form cannot set an `Authorization` header.
 `SameSite=Strict` is what stands in for a CSRF token here.
 
+### Configuring email
+
+The **Email** page is the shortest path from "reset codes go to the log" to
+"reset codes arrive by mail". Fill in the server, port, security, username,
+password and sender address, put your own address in "Send a test to", and press
+**Send test** — that posts one message through the values on screen without
+saving them, so a wrong port costs nothing. Press **Save** when it arrives.
+
+Saving writes the configuration to `dogwalk:settings:smtp` and rebuilds
+`app.state.email_sender` in place, so the next reset email uses the new server
+with no restart. A saved configuration wins over `EMAIL_SENDER`, which is why the
+page works on a deployment that still says `EMAIL_SENDER=logging`. **Forget this
+configuration** deletes the key and falls back to the environment.
+
+The password is write-only. It is never returned by `GET /admin/smtp` (which
+reports `has_password` instead), never placed in the template context, and never
+written to the audit log — which records `smtp_saved` with the host and sender,
+and `smtp_test` with the recipient and whether it was delivered.
+
 ### Endpoints
 
 | Endpoint | Purpose |
@@ -337,6 +370,10 @@ The HTML pages authenticate with an HttpOnly, `SameSite=Strict` cookie scoped to
 | `GET /admin/invites` | Unused codes, and how many have been used |
 | `POST /admin/invites` | Mint 1–50 codes (201) |
 | `GET /admin/stats` | Account and invite counts |
+| `GET /admin/smtp` | The SMTP configuration in use, with `has_password` rather than the password |
+| `PUT /admin/smtp` | Save a configuration and rebuild the running sender (400 if it is unusable) |
+| `DELETE /admin/smtp` | Forget it and fall back to `EMAIL_SENDER` (204) |
+| `POST /admin/smtp/test` | Send one message through the submitted values, without saving them |
 | `GET /admin/audit` | Recent operator actions, newest first |
 
 Every mutating route writes to `dogwalk:admin:audit`, a capped list of 1000
