@@ -28,8 +28,8 @@ rebooted, see **Resuming** instead.
 | `backend-redis-1` | Up (healthy), `0.0.0.0:6379`, AOF on, `redis-data` volume |
 | `backend-caddy-1` | Up, `0.0.0.0:8443`, `caddy-data` volume |
 | Admin panel | Up at `/admin/ui`, operator `operator@example.com` / `operator-password` |
-| Emulator | **Not running.** Start it before any Android work. |
-| App | Last installed build signed in as `fresh@example.com`, dog `Pickle` |
+| Emulator | `Medium_Phone_API_37.0`, running as `emulator-5554` |
+| App | Signed out at the login screen, on the VPS-default build. `fresh@example.com` is local-Redis only, so it cannot sign in against the VPS — see **Resuming** for the local-stack recipe. |
 
 Redis holds 8 accounts, 46 unused invites and 27 used ones. One account,
 `tokke@test.be`, was created through the panel and **has never completed its
@@ -84,6 +84,15 @@ export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
 `JAVA_HOME` is not set globally and the `java` on `PATH` is JDK 8, so Gradle
 aborts with `Gradle requires JVM 17 or later` unless you export it first. The
 Android Studio JBR is JDK 25.
+
+The committed `DEFAULT_BACKEND_URL` is the VPS, and the in-app override lives
+behind the login screen — so to sign in against the local stack you have to set
+`DEFAULT_BACKEND_URL` to `wss://10.0.2.2:8443/ws/walk` in
+`android/app/build.gradle.kts`, build, sign in, and revert it afterwards. The
+local accounts (`fresh@example.com` / `hunter2hunter2`) exist only in the local
+Redis. The map tiles are unaffected either way: `assets/style.json` points at
+`maps.thomasfeyens.be` with an absolute URL, so the basemap loads from the VPS
+even when the backend is local.
 
 The emulator must be running first. If you recreate the AVD or run
 `adb shell pm clear com.dogwalk`, re-grant the permissions — clearing wipes them:
@@ -924,9 +933,14 @@ next person meets it as a passing test rather than a mystery failure.
   `ios/` as a reviewed starting point, not working code.
 - **The iOS port has no tests and no CI.** Same gap as Android, one platform
   further out.
-- **`assets/style.json` points at `tile.openstreetmap.org`**, which violates the
-  OSM tile usage policy for a published app. This affects both platforms and is
-  not fixed. Budget for a tile source before either app ships.
+- **`assets/style.json` is a vector style over the self-hosted PMTiles** at
+  `pmtiles://https://maps.thomasfeyens.be/benelux.pmtiles`, so no third-party
+  tile service is involved and the OSM tile-usage violation is gone. MapLibre
+  Native reads PMTiles directly — supported since Android 11.7.0, and this
+  project is on 12.0.0 — so there is no tile server to run: Caddy serves the
+  archive and the client makes range requests against it. The style has no
+  symbol layers and no `glyphs` key on purpose; see the glyph note under
+  **Environment facts**. `ios/` still has no style file.
 
 ## Environment facts worth not rediscovering
 
@@ -965,6 +979,10 @@ next person meets it as a passing test rather than a mystery failure.
   `asset://` also failed. Name labels are Compose `Text` overlays in
   `ui/map/MapLibreMap.kt`, positioned via `Projection.toScreenLocation` and
   refreshed on every camera move. Do not try to reintroduce glyphs.
+  `deploy/Caddyfile` strips `ETag` and `Last-Modified` from `/fonts/*` and
+  `/sprites/*` to dodge the `304`, but that only removes one cause; the vector
+  style in `assets/style.json` is therefore written with no symbol layers at
+  all, and the Compose overlays remain the only labels.
 - **`.smoke/ui.py`** dumps the current screen and prints every non-empty `text`
   with its exact tap centre, optionally filtered:
   `backend/.venv/Scripts/python.exe .smoke/ui.py buddy`. It is the fastest way to

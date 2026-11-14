@@ -285,11 +285,18 @@ deploy mid-evening annoys someone.
   all. That is the version that makes someone feel safe, and it is still unbuilt.
 - Report a walker.
 - Multiple dogs per account.
-- Replace the raster OSM style with a proper vector style. This also removes the
-  Compose-`Text` label workaround, which exists only because MapLibre's glyph
-  loading is broken here — see `HANDOFF.md`.
+- ~~Replace the raster OSM style with a proper vector style.~~ **Done** — the
+  style is now a glyph-free vector style over the self-hosted PMTiles on
+  `maps.thomasfeyens.be`. The Compose-`Text` label workaround stays, because it
+  is the glyph problem that forced it, not the raster source; see `HANDOFF.md`.
 
 ## Suggested next session
+
+**The map is off third-party tiles.** `assets/style.json` is now a vector style
+over the self-hosted PMTiles on `maps.thomasfeyens.be`, verified on the emulator
+at street level. MapLibre Native reads PMTiles directly, so nothing new runs on
+the VPS. The style has no symbol layers, so it needs no glyph server and the
+Compose label overlays are unchanged.
 
 CI is in. `.github/workflows/ci.yml` runs `pytest`, `testDebugUnitTest` and
 `lintDebug`, and `scripts/e2e.py` against real Redis. Turning lint on found and

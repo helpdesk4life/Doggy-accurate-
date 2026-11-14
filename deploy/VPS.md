@@ -299,6 +299,13 @@ Amsterdam Dam; a Belgium-only extract leaves your own test device on a blank map
 `pmtiles extract` reads only the byte ranges it needs from the remote planet
 build, so it never downloads the 120 GB file.
 
+Nothing else runs here. The app reads the archive directly: `assets/style.json`
+declares `pmtiles://https://maps.thomasfeyens.be/benelux.pmtiles`, and MapLibre
+Native (11.7.0 and later) turns that into range requests against Caddy. There is
+no `pmtiles serve`, no tile server and no systemd unit to keep alive — which is
+why the range-request check in **11. Verify** matters: a 200 instead of a 206
+means the map will not load at all.
+
 ## 10. Caddy config
 
 ```bash

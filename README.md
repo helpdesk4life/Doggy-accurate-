@@ -593,8 +593,11 @@ the backend directly on port 8000, so they do not need the Caddy CA.
 
 ## Notes
 
-- The map style is `android/app/src/main/assets/style.json`, raster OpenStreetMap tiles.
-  Swap the `tiles` URL for a vector style with an API key if you want labels and POIs.
+- The map style is `android/app/src/main/assets/style.json`: a vector style over the
+  self-hosted PMTiles archive at `pmtiles://https://maps.thomasfeyens.be/benelux.pmtiles`.
+  MapLibre Native reads PMTiles directly, so no tile server runs — Caddy serves the
+  archive and the client range-requests it. The style deliberately has no symbol
+  layers, so it needs no glyph server; name labels are Compose overlays.
 - Tokens are stored in `SecurePrefs`, which encrypts each value with a
   Keystore-backed AES-GCM key (`AES/GCM/NoPadding`, 256-bit, alias
   `dogwalk_auth_key`) and writes `iv:ciphertext` base64. A value that fails to
