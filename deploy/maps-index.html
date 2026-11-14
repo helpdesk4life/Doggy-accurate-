@@ -1,0 +1,51 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>maps.thomasfeyens.be</title>
+<style>
+  :root { color-scheme: dark; }
+  body {
+    margin: 0; padding: 2rem 1.25rem; max-width: 46rem;
+    font: 16px/1.55 system-ui, -apple-system, "Segoe UI", sans-serif;
+    background: #14171c; color: #e6e9ee;
+  }
+  h1 { font-size: 1.35rem; margin: 0 0 .25rem; }
+  p.sub { color: #9aa4b2; margin-top: 0; }
+  ul { padding-left: 1.1rem; }
+  li { margin: .5rem 0; }
+  code, a { color: #7cc7ff; }
+  code { background: #1d222b; padding: .1rem .35rem; border-radius: 4px; }
+  .note { color: #9aa4b2; font-size: .9rem; }
+</style>
+</head>
+<body>
+<h1>maps.thomasfeyens.be</h1>
+<p class="sub">Static map assets for DogWalk, served by Caddy over HTTPS with a Let&rsquo;s Encrypt certificate.</p>
+
+<ul>
+  <li>
+    <a href="/benelux.pmtiles"><code>/benelux.pmtiles</code></a>
+    — Benelux vector tiles, PMTiles v3, zoom 0&ndash;15, ~2.85&nbsp;GB.
+    A browser cannot render this file; paste the URL into
+    <a href="https://pmtiles.io">pmtiles.io</a> to sanity-check the archive.
+  </li>
+  <li>
+    <a href="/fonts/Noto%20Sans%20Regular/0-255.pbf"><code>/fonts/&hellip;/0-255.pbf</code></a>
+    — glyph ranges for MapLibre. These responses deliberately carry
+    <em>no</em> ETag or Last-Modified, because MapLibre Native mishandles a 304 on glyphs.
+  </li>
+  <li>
+    <a href="/sprites/v4/dark.png"><code>/sprites/v4/dark.png</code></a>
+    and <code>dark.json</code> — sprite sheets, same no-validator rule.
+  </li>
+</ul>
+
+<p class="note">
+  Range requests are supported (<code>Accept-Ranges: bytes</code>), which is what a
+  PMTiles client needs. This host is consumed by the app, not by a browser tab;
+  there is no map page here on purpose.
+</p>
+</body>
+</html>

@@ -274,6 +274,10 @@ pmtiles extract https://build.protomaps.com/20261112.pmtiles benelux.pmtiles \
 git clone --depth 1 https://github.com/protomaps/basemaps-assets /tmp/assets
 cp -r /tmp/assets/fonts /tmp/assets/sprites /srv/maps/
 
+# A browser visiting https://maps.thomasfeyens.be/ would otherwise get a 404,
+# because /srv/maps has no index file. This page says what is served where.
+cp ~/dog/deploy/maps-index.html /srv/maps/index.html
+
 chmod -R a+rX /srv/maps
 pmtiles show /srv/maps/benelux.pmtiles | head -20
 ```
