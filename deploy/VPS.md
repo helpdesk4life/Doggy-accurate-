@@ -156,6 +156,19 @@ chmod o+r /etc/apt/sources.list.d/caddy-stable.list
 apt update && apt install -y caddy
 ```
 
+**Check the version before loading any config.** `basic_auth` in
+`deploy/Caddyfile` only exists from Caddy 2.8 onwards. On an older binary the
+whole config is rejected, `systemctl reload caddy` fails, and Caddy keeps serving
+whatever it was already serving — on a fresh install that is the default `:80`
+hello page, so nothing ever listens on 443 and every HTTPS connection is
+refused. That is exactly how the first deployment failed.
+
+```bash
+caddy version                 # must print v2.8.0 or newer
+apt policy caddy | head -5    # the candidate must come from dl.cloudsmith.io,
+                              # not from Ubuntu's own repository (2.6.x on 24.04)
+```
+
 Certificates are issued and renewed by Caddy itself. There is nothing to schedule
 and no certbot.
 
@@ -226,6 +239,26 @@ refuse to boot if `JWT_SECRET` is still the public development value, or if
 is you stating that this box's logs are readable only by you; delete it the day
 you wire up a real email provider.
 
+### First operator account and the first invite code
+
+`INVITE_REQUIRED=1` is on, so until a code is minted nobody can register — and
+until an admin exists nobody can open the panel. Both are operator scripts, and
+on this box they run **inside the backend container**, because the host has no
+virtualenv and the scripts import `app`:
+
+```bash
+cd ~/dog/backend
+
+docker compose exec backend python scripts/create_admin.py --email you@example.com
+# prompts for a password; there is no recovery flow, so keep it somewhere safe
+
+docker compose exec backend python scripts/mint_invites.py --count 3
+```
+
+The container already carries `REDIS_URL=redis://redis:6379/0` in its
+environment, so the scripts find Redis with no extra arguments, and
+`docker compose exec` allocates the TTY that the password prompt needs.
+
 ## 9. Maps
 
 ```bash
@@ -254,9 +287,25 @@ build, so it never downloads the 120 GB file.
 ## 10. Caddy config
 
 ```bash
+# Keep the config that is currently working, so a bad one is reversible.
+cp /etc/caddy/Caddyfile /etc/caddy/Caddyfile.bak 2>/dev/null || true
 cp ~/dog/deploy/Caddyfile /etc/caddy/Caddyfile
-caddy validate --config /etc/caddy/Caddyfile
+
+caddy validate --config /etc/caddy/Caddyfile || {
+  echo "config rejected — the running config is untouched; fix and retry"
+  exit 1
+}
 systemctl reload caddy
+
+# A failed reload leaves the old config in place, and reloading a service that
+# is not running is a silent no-op — so check the service, not just the exit code.
+systemctl is-active caddy
+```
+
+Rollback, if a reload ever breaks a working box:
+
+```bash
+cp /etc/caddy/Caddyfile.bak /etc/caddy/Caddyfile && systemctl reload caddy
 ```
 
 `caddy validate` prints one warning about `header_up X-Forwarded-For` being
@@ -267,23 +316,32 @@ caller choose its own rate-limit bucket. Ignore the warning.
 ## 11. Verify
 
 ```bash
+sudo bash ~/dog/deploy/verify.sh
+```
+
+Twelve checks, ordered from the Caddy version down to the certificate issuer.
+The first FAIL is the layer that is broken; everything below it is a consequence
+of that one. The script exits non-zero if anything failed, so it is safe to use
+as the last step of a deploy and the first step of a diagnosis, and it changes
+nothing.
+
+The individual checks, if you want to run one by hand:
+
+```bash
 curl -s https://backend.thomasfeyens.be/health
 ```
 
 ```bash
+# Must print 206. A 200 means range requests are broken and the map will not load.
 curl -s -o /dev/null -w "%{http_code}\n" -H "Range: bytes=0-16383" \
   https://maps.thomasfeyens.be/benelux.pmtiles
 ```
 
-Must print `206`. A `200` means range requests are broken and the map will not
-load.
-
 ```bash
+# Must print nothing. An ETag here means the glyph fix is not in effect and the
+# map will render without street names.
 curl -sI "https://maps.thomasfeyens.be/fonts/Noto%20Sans%20Regular/0-255.pbf" | grep -i etag
 ```
-
-Must print **nothing**. An `ETag` here means the glyph fix is not in effect and
-the map will render without street names.
 
 Then check the certificate is real and not Caddy's internal CA:
 
@@ -293,6 +351,9 @@ echo | openssl s_client -connect backend.thomasfeyens.be:443 -servername backend
 ```
 
 The issuer should be Let's Encrypt (or ZeroSSL), not "Caddy Local Authority".
+That name means the *local* `backend/Caddyfile` is loaded instead of
+`deploy/Caddyfile` — the two are easy to confuse because both live in the repo —
+and no browser or phone will trust a certificate from the internal CA.
 
 ## 12. Ongoing
 
@@ -306,6 +367,14 @@ cd ~/dog && git pull && cd backend && docker compose up -d --build backend
 # back up the accounts. The geo index is disposable; the user store is not.
 docker run --rm -v backend_redis-data:/data -v "$PWD":/backup alpine \
   tar czf /backup/redis-$(date +%F).tgz -C /data .
+```
+
+A reboot brings the stack back on its own — the containers carry
+`restart: unless-stopped` in `docker-compose.yml` and Caddy is enabled by its
+package. After any reboot or update, run the verify script again:
+
+```bash
+sudo bash ~/dog/deploy/verify.sh
 ```
 
 Caddy renews certificates on its own. `apt` upgrades itself via

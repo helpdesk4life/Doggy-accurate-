@@ -4,6 +4,10 @@ services:
     # AOF so accounts survive a restart. The geo index is disposable, but the
     # user store is not.
     command: ["redis-server", "--appendonly", "yes"]
+    # Without this a reboot leaves the whole stack down and nothing says so.
+    # `unless-stopped` rather than `always`: a container you stopped on purpose
+    # stays stopped.
+    restart: unless-stopped
     # Loopback only, for the same reason the backend is: Redis has no password
     # here, so publishing it on 0.0.0.0 hands an unauthenticated datastore to
     # anyone who can reach the host. The scripts in scripts/ run on the host and
@@ -20,6 +24,7 @@ services:
 
   backend:
     build: .
+    restart: unless-stopped
     # Loopback only. The app is meant to be reached through Caddy, which is what
     # terminates TLS and sets X-Forwarded-For. Publishing 8000 on 0.0.0.0 would
     # let anyone on the LAN skip TLS and spoof the header the rate limiter bills
@@ -51,11 +56,25 @@ services:
     depends_on:
       redis:
         condition: service_healthy
+    # The image is python:3.12-slim, so there is no curl to probe with. This is
+    # the same endpoint deploy/verify.sh checks from outside, which is the point:
+    # `docker compose ps` should say "healthy" only when the app answers.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen("http://127.0.0.1:8000/health", timeout=3)
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   # TLS terminator. Caddy issues itself a local CA, so wss:// works without a
   # domain. Point the app at wss://<host>:8443/ws/walk once you trust the CA.
   caddy:
     image: caddy:2-alpine
+    restart: unless-stopped
     ports:
       - "8443:8443"
     volumes:

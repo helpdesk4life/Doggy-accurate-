@@ -1,5 +1,7 @@
 # core.autocrlf is true on the Windows checkout, so a text file committed as LF
 # comes back as CRLF the next time Git touches it. Caddy accepts a CRLF
-# Caddyfile but reports it as unformatted, which reads like a config error.
-# Pin the file that is copied to the VPS.
+# Caddyfile but reports it as unformatted, which reads like a config error, and
+# bash does not accept a CRLF script at all ("$'\r': command not found").
+# Pin the files that are copied to the VPS.
 deploy/Caddyfile text eol=lf
+deploy/verify.sh text eol=lf

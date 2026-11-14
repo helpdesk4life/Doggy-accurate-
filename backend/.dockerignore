@@ -1,0 +1,13 @@
+# The build context is backend/. Without this file the whole directory is sent to
+# the daemon on every build, including .venv (hundreds of megabytes) and the
+# production .env, which holds JWT_SECRET. Neither is copied into the image, but
+# both are transferred, and the .env is the one value that makes every token in
+# the deployment forgeable.
+.venv/
+.env
+__pycache__/
+**/__pycache__/
+*.pyc
+.pytest_cache/
+.ruff_cache/
+tests/
