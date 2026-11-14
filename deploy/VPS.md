@@ -391,6 +391,19 @@ docker run --rm -v backend_redis-data:/data -v "$PWD":/backup alpine \
   tar czf /backup/redis-$(date +%F).tgz -C /data .
 ```
 
+Run that as `thomas`, not as `root`. The deploy key lives in
+`/home/thomas/.ssh/github_dogwalk` and the repo is owned by `thomas`; root has
+neither the key nor the `Host github.com` entry in `~/.ssh/config`, so a `git
+pull` from a root shell fails with `Permission denied (publickey)`. That reads
+like a missing or revoked deploy key and sends you looking at GitHub, but it is
+only the wrong user. From a root shell:
+
+```bash
+sudo -u thomas bash -lc 'cd ~/dog && git pull && cd backend && docker compose up -d --build backend'
+```
+
+`thomas` is in the `docker` group, so the whole sequence works under that user.
+
 A reboot brings the stack back on its own — the containers carry
 `restart: unless-stopped` in `docker-compose.yml` and Caddy is enabled by its
 package. After any reboot or update, run the verify script again:
