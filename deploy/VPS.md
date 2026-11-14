@@ -203,9 +203,20 @@ git clone git@github.com:helpdesk4life/doggy.git ~/dog
 cd ~/dog && git log --oneline -1
 ```
 
+On a fresh box the first `ssh -T` fails with "Host key verification failed",
+because `~/.ssh/known_hosts` does not know github.com yet and nothing is there to
+accept the key interactively. Scan it in first, then check the fingerprint against
+the ones GitHub publishes
+([docs.github.com … githubs-ssh-key-fingerprints](https://docs.github.com/en/authentication/keeping-your-account-and-data-secure/githubs-ssh-key-fingerprints)):
+
+```bash
+ssh-keyscan -t ed25519,ecdsa,rsa github.com >> ~/.ssh/known_hosts 2>/dev/null
+ssh-keygen -lf ~/.ssh/known_hosts
+# ED25519 must read SHA256:+DiY3wvvV6TuJJhbpZisF/zLDA0zPMSvHdkr4UvCOqU
+```
+
 `ssh -T` answers `Hi helpdesk4life/doggy! You've successfully authenticated, but
-GitHub does not provide shell access.` — that is success. It also accepts
-GitHub's host key on the way, so the clone does not prompt.
+GitHub does not provide shell access.` — that is success.
 
 `IdentitiesOnly yes` is not optional. Without it SSH offers every key it holds,
 GitHub rejects the first few, and the clone dies with `Too many authentication
