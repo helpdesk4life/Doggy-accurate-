@@ -81,6 +81,24 @@ def test_reset_request_for_an_unknown_address_looks_identical(client, sender):
     assert sender.sent == []
 
 
+def test_a_failing_sender_does_not_reveal_that_the_address_exists(client, sender):
+    """A provider outage must not become an oracle either.
+
+    If the send raised, a known address would answer 500 and an unknown one 202,
+    which is the same leak the identical-status rule above exists to prevent.
+    """
+    register(client)
+
+    async def explode(**kwargs):
+        raise RuntimeError("provider is down")
+
+    sender.send = explode
+
+    response = client.post("/auth/password-reset/request", json={"email": EMAIL})
+
+    assert response.status_code == 202
+
+
 def test_reset_code_changes_the_password_and_kills_old_sessions(client, sender):
     session = register(client)
     client.post("/auth/password-reset/request", json={"email": EMAIL})

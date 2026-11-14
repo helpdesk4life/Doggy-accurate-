@@ -99,8 +99,8 @@ base64. A value that fails to decrypt is dropped rather than crashing the app.
 **Decision: build it, log the email.** Full reset-token flow with a pluggable
 sender. `app/email.py` defines an `EmailSender` protocol, a `LoggingEmailSender`
 that writes the code to the backend log, and a `build_sender` factory that
-`EMAIL_SENDER` selects from. Swapping in a real provider is one class plus one
-branch in that factory.
+`EMAIL_SENDER` selects from. A real `SmtpEmailSender` now sits behind
+`EMAIL_SENDER=smtp`, so going live is credentials rather than code.
 
 Codes are 6 digits, stored as a sha256 key, valid 15 minutes, single use, capped
 at 10 attempts. `POST /auth/password-reset/request` returns 202 whether or not the
@@ -272,12 +272,12 @@ deploy mid-evening annoys someone.
   valid invite code has been spent, so an uninvited caller learns nothing. Anyone
   holding a code can still probe, and a leaked code is a leaked invitation. Email
   verification is the general fix and would let the gate come off.
-- **Reset codes are logged, and that is now a boot failure outside development.**
-  `LoggingEmailSender` writes the code to the backend log, so `Settings.validate()`
-  refuses to start unless `ALLOW_LOGGING_EMAIL=1` acknowledges it. The remaining
-  work is a real sender: implement `EmailSender`, add it to `email.build_sender`,
-  and set `EMAIL_SENDER` to its name. Until then the acknowledgement is the only
-  thing standing between a log reader and any account.
+- **Reset codes still go to the log on the VPS.** The sender is written —
+  `SmtpEmailSender` behind `EMAIL_SENDER=smtp` — but there are no SMTP credentials
+  yet, so the deployment runs `EMAIL_SENDER=logging` with `ALLOW_LOGGING_EMAIL=1`
+  and `Settings.validate()` lets it through. Until `SMTP_HOST`/`SMTP_FROM` are set,
+  that acknowledgement is the only thing standing between a log reader and any
+  account.
 
 ## P3 — product ideas, not commitments
 
@@ -348,8 +348,10 @@ All three from last session are answered and implemented:
 
 New ones, none of which block anything today:
 
-1. **Email provider** — when you want reset emails to actually arrive, which one?
-   Resend and Postmark are the two that need the least setup for a small app.
+1. ~~**Email provider**~~ → **SMTP, provider-agnostic.** `SmtpEmailSender` speaks
+   plain SMTP, so Resend, Postmark, Mailgun, Fastmail or a local relay all work
+   without a code change. What is left is picking one and pasting the credentials
+   into the VPS `.env`.
 2. **Do you want email verification?** The enumeration gap is closed by invite
    codes, so this is no longer a security fix — it is what would let the gate come
    off and the app open to strangers. It adds a second email flow and a "not yet

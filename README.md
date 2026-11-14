@@ -74,8 +74,14 @@ python -m venv .venv
 | `PUBLIC_BASE_URL` | `http://localhost:8000` | Base URL used to build the link in a password-reset email |
 | `RATE_LIMIT_ENABLED` | `1` | Per-IP throttling on the auth endpoints |
 | `INVITE_REQUIRED` | `1` | Registration needs a single-use code |
-| `EMAIL_SENDER` | `logging` | Which `EmailSender` to install. Only `logging` exists today |
+| `EMAIL_SENDER` | `logging` | Which `EmailSender` to install: `logging` or `smtp` |
 | `ALLOW_LOGGING_EMAIL` | `0` | Acknowledges that reset codes go to the log, outside development |
+| `SMTP_HOST` | — | SMTP server. Required when `EMAIL_SENDER=smtp` |
+| `SMTP_PORT` | `587` | SMTP port |
+| `SMTP_USERNAME` | — | SMTP login. Leave empty for a relay that needs no auth |
+| `SMTP_PASSWORD` | — | SMTP password or provider API key |
+| `SMTP_FROM` | — | Envelope sender. Required when `EMAIL_SENDER=smtp` |
+| `SMTP_SECURITY` | `starttls` | `starttls` (587), `ssl` (465) or `none` (a relay on this host) |
 
 `JWT_SECRET` has a built-in development default, and `Settings.validate()` runs at
 `create_app` time. Outside development the backend **refuses to boot** if the
@@ -88,13 +94,33 @@ where anyone who has read this repository can mint a token for any account. Set
 proximity alerts; see [Privacy](#privacy). Setting either to `0` disables
 quantisation and broadcasts positions to within a few metres — development only.
 
-The only email sender is `LoggingEmailSender`, which writes the whole message —
-including a password-reset code — to the backend log. Outside development the
-backend **refuses to boot** with it, for the same reason as the secret: a reset
-code in a log is a working account takeover for anyone who can read that log.
-Set `ALLOW_LOGGING_EMAIL=1` to accept that on a box whose logs nobody else can
-read, or implement a real sender in `app/email.py`, add it to `build_sender`, and
-set `EMAIL_SENDER` to its name.
+`EMAIL_SENDER` picks the sender. `logging` writes the whole message — including a
+password-reset code — to the backend log, and outside development the backend
+**refuses to boot** with it, for the same reason as the secret: a reset code in a
+log is a working account takeover for anyone who can read that log. Set
+`ALLOW_LOGGING_EMAIL=1` to accept that on a box whose logs nobody else can read.
+
+`smtp` is the real one, and it works with any provider that speaks SMTP — Resend,
+Postmark, Mailgun, Fastmail, a local relay — so there is no provider-specific
+code to write:
+
+```bash
+EMAIL_SENDER=smtp
+SMTP_HOST=smtp.resend.com
+SMTP_PORT=587
+SMTP_USERNAME=resend
+SMTP_PASSWORD=re_your_api_key
+SMTP_FROM=DogWalk <no-reply@yourdomain.example>
+SMTP_SECURITY=starttls
+```
+
+`Settings.validate()` refuses to boot if `SMTP_HOST` or `SMTP_FROM` is empty, if
+`SMTP_SECURITY` is not one of the three modes, or if a password is set while
+`SMTP_SECURITY=none` — that would put the password on the wire in the clear. The
+send itself runs on a worker thread, so a slow provider cannot stall the event
+loop, and a failed send is logged rather than raised: a 500 for a known address
+and a 202 for an unknown one would be the account enumeration oracle the endpoint
+is built to avoid.
 
 ### Tests
 

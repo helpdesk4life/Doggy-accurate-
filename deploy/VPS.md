@@ -250,6 +250,28 @@ refuse to boot if `JWT_SECRET` is still the public development value, or if
 is you stating that this box's logs are readable only by you; delete it the day
 you wire up a real email provider.
 
+### Switching reset emails to SMTP
+
+`app/email.py` has a real `SmtpEmailSender`, so this is credentials rather than
+code. Any provider that speaks SMTP works. Replace the `ALLOW_LOGGING_EMAIL` line
+in `~/dog/backend/.env` with:
+
+```bash
+EMAIL_SENDER=smtp
+SMTP_HOST=smtp.resend.com
+SMTP_PORT=587
+SMTP_USERNAME=resend
+SMTP_PASSWORD=re_your_api_key
+SMTP_FROM=DogWalk <no-reply@yourdomain.example>
+SMTP_SECURITY=starttls
+```
+
+then `docker compose up -d backend`. **Do not set `EMAIL_SENDER=smtp` without
+`SMTP_HOST` and `SMTP_FROM`** — `Settings.validate()` refuses to boot, so the
+container restart-loops instead of quietly falling back to the log. Check with
+`docker compose logs backend | head` and a real reset request; the code should
+arrive by mail and *not* appear in the log.
+
 ### First operator account and the first invite code
 
 `INVITE_REQUIRED=1` is on, so until a code is minted nobody can register — and
@@ -418,9 +440,11 @@ so the command above is manual until you add one.
 
 ## What this does not do
 
-- **No real email sender.** Reset codes go to the backend log, which is why
+- **No SMTP credentials yet.** Reset codes go to the backend log, which is why
   `ALLOW_LOGGING_EMAIL=1` is in the `.env`. Anyone who can read
-  `docker compose logs backend` can reset any account.
+  `docker compose logs backend` can reset any account. The sender is written —
+  see **Switching reset emails to SMTP** above — so this is a provider account
+  and five lines of `.env`, not code.
 - ~~**No second gate on the admin panel.**~~ Closed: `/admin*` sits behind
   Caddy `basic_auth` (user `thomas`) before the app's own login. The password
   was set at deploy time and is not in this repository — regenerate with

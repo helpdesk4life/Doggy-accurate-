@@ -292,11 +292,18 @@ async def request_password_reset(body: PasswordResetRequest, request: Request) -
 
     if user is not None:
         code = await users.create_reset_code(redis, user["email"])
-        await request.app.state.email_sender.send(
-            to=user["email"],
-            subject="Your DogWalk password reset code",
-            body=email.reset_email_body(code, users.RESET_TTL_SECONDS // 60),
-        )
+        try:
+            await request.app.state.email_sender.send(
+                to=user["email"],
+                subject="Your DogWalk password reset code",
+                body=email.reset_email_body(code, users.RESET_TTL_SECONDS // 60),
+            )
+        except Exception:
+            # A provider outage must not turn this endpoint into an account
+            # oracle: a 500 for a known address and a 202 for an unknown one says
+            # which addresses have accounts. The code stays valid, so a retry
+            # once the provider recovers still works.
+            logger.exception("could not send the reset email for %s", user["user_id"])
 
     return Response(status_code=202)
 

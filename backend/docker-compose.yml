@@ -53,6 +53,14 @@ services:
       # acknowledgement below.
       EMAIL_SENDER: ${EMAIL_SENDER:-logging}
       ALLOW_LOGGING_EMAIL: ${ALLOW_LOGGING_EMAIL:-0}
+      # Only read when EMAIL_SENDER=smtp. Forwarded for the same reason as the
+      # two above: a .env file feeds ${...} interpolation here, and nothing else.
+      SMTP_HOST: ${SMTP_HOST:-}
+      SMTP_PORT: ${SMTP_PORT:-587}
+      SMTP_USERNAME: ${SMTP_USERNAME:-}
+      SMTP_PASSWORD: ${SMTP_PASSWORD:-}
+      SMTP_FROM: ${SMTP_FROM:-}
+      SMTP_SECURITY: ${SMTP_SECURITY:-starttls}
     depends_on:
       redis:
         condition: service_healthy

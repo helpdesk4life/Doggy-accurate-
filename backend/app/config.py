@@ -11,6 +11,10 @@ MIN_JWT_SECRET_BYTES = 32
 
 DEVELOPMENT_ENVIRONMENTS = frozenset({"development", "dev", "local", "test"})
 
+# starttls upgrades a plain connection (port 587), ssl wraps it from the first
+# byte (port 465), none is for a relay on the same host.
+SMTP_SECURITY_MODES = frozenset({"starttls", "ssl", "none"})
+
 
 @dataclass(frozen=True)
 class Settings:
@@ -66,10 +70,22 @@ class Settings:
     # only once there is email verification to replace it.
     invite_required: bool = os.getenv("INVITE_REQUIRED", "1") not in {"0", "false", "no"}
 
-    # Which EmailSender to install. Only "logging" exists today, and it writes the
-    # whole message — including a password-reset code — to the backend log. See
-    # validate(): outside development that is refused unless it is acknowledged.
+    # Which EmailSender to install. "logging" writes the whole message —
+    # including a password-reset code — to the backend log, so validate() refuses
+    # it outside development unless it is acknowledged. "smtp" is the real one.
     email_sender: str = os.getenv("EMAIL_SENDER", "logging")
+
+    # SMTP, used when EMAIL_SENDER=smtp. Any provider that speaks the protocol
+    # works, so nothing here is provider-specific.
+    smtp_host: str = os.getenv("SMTP_HOST", "")
+    smtp_port: int = int(os.getenv("SMTP_PORT", "587"))
+    smtp_username: str = os.getenv("SMTP_USERNAME", "")
+    smtp_password: str = os.getenv("SMTP_PASSWORD", "")
+    # The envelope sender. Providers usually require it to be an address verified
+    # with them, so it is not derived from SMTP_USERNAME.
+    smtp_from: str = os.getenv("SMTP_FROM", "")
+    smtp_security: str = os.getenv("SMTP_SECURITY", "starttls")
+    smtp_timeout_seconds: float = float(os.getenv("SMTP_TIMEOUT_SECONDS", "15"))
 
     # The acknowledgement. A reset code in a log is a working account takeover for
     # anyone who can read that log, so the default is to refuse to boot rather
@@ -128,6 +144,37 @@ class Settings:
                 "app/email.py and set EMAIL_SENDER to it, or set "
                 "ALLOW_LOGGING_EMAIL=1 if the logs are readable only by you."
             )
+
+        if self.email_sender == "smtp":
+            missing = [
+                name
+                for name, value in (
+                    ("SMTP_HOST", self.smtp_host),
+                    ("SMTP_FROM", self.smtp_from),
+                )
+                if not value.strip()
+            ]
+            if missing:
+                raise RuntimeError(
+                    f"EMAIL_SENDER is 'smtp' but {' and '.join(missing)} "
+                    f"{'is' if len(missing) == 1 else 'are'} empty. Without a host "
+                    "there is nowhere to send, and without a sender address the "
+                    "provider rejects the message. Set both, or use "
+                    "EMAIL_SENDER=logging on a development machine."
+                )
+
+            if self.smtp_security not in SMTP_SECURITY_MODES:
+                raise RuntimeError(
+                    f"SMTP_SECURITY is {self.smtp_security!r}. Use 'starttls' "
+                    "(port 587), 'ssl' (port 465) or 'none' (a relay on this host)."
+                )
+
+            if self.smtp_security == "none" and self.smtp_password:
+                raise RuntimeError(
+                    "SMTP_SECURITY is 'none' but SMTP_PASSWORD is set, so the "
+                    "password would cross the network in the clear. Use 'starttls' "
+                    "or 'ssl', or drop the password if the relay is on this host."
+                )
 
 
 settings = Settings()
