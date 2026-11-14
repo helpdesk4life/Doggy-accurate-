@@ -23,7 +23,7 @@ export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
 
 # 4. Confirm nothing regressed
 cd /c/Users/thoma/Downloads/dog/backend
-./.venv/Scripts/python.exe -m pytest -q          # expect 156 passed
+./.venv/Scripts/python.exe -m pytest -q          # expect 207 passed
 ./.venv/Scripts/python.exe scripts/e2e.py        # expect 56/56
 ```
 
@@ -279,6 +279,14 @@ deploy mid-evening annoys someone.
   deployment runs `EMAIL_SENDER=logging` with `ALLOW_LOGGING_EMAIL=1` and
   `Settings.validate()` lets it through. Until someone fills in that page, the
   acknowledgement is the only thing standing between a log reader and any account.
+- **`POST /blocks/{id}` is capped and throttled, not validated.** The route takes
+  any 32-hex id and writes two keys, and an id that never belonged to an account
+  is cleaned up by nothing except an unblock — so the list is capped at
+  `blocks.MAX_BLOCKS` (200, answered as 409) and the prefix is throttled at
+  60/minute. The cap is deliberately not an existence check: a 404 would be an
+  account oracle, and skipping the write for an unknown id would leak the same
+  thing through `GET /blocks`. The ceiling check is not atomic with the write, so
+  two concurrent blocks can overshoot by one.
 
 ## P3 — product ideas, not commitments
 

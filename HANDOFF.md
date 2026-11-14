@@ -365,6 +365,20 @@ Four things worth not undoing:
 4. **Account deletion calls `blocks.forget()`.** Without it, everyone who blocked
    the deleted walker keeps a stale id and a name in their settings forever.
 
+**The list is capped at `blocks.MAX_BLOCKS` (200) and the route is throttled.**
+`POST /blocks/{id}` accepts any 32-hex id and writes two keys, and an id that
+never belonged to an account is cleaned up by nothing except an unblock — so
+without a ceiling a signed-in account could mint keys until Redis ran out of
+memory. The cap answers 409, which is a property of the caller's own list and
+says nothing about the id, so it is not the oracle that a 404 would be. Skipping
+the write for an unknown id was the other option and is worse: the entry would
+be missing from `GET /blocks`, which leaks the same thing more quietly. The
+check is not atomic with the write, so two concurrent blocks can overshoot by
+one; a soft ceiling is enough, because the point is that the number is bounded
+rather than exact. `ratelimit.PREFIX_LIMITS` adds a 60/minute bucket keyed on the
+`/blocks/` prefix — keyed on the full path, every id would get its own counter,
+which is the same as no limit at all.
+
 Verified on the emulator against the local stack: 14 `PROXIMITY_ALERT` frames
 carrying the other walker, then nothing but `PROXIMITY_CLEAR` after the block;
 the settings list showed the blocked walker; unblocking brought them back; and
@@ -404,7 +418,10 @@ and the map is unreachable until you sign in.
 - Per-IP rate limits (`app/ratelimit.py`) apply to the auth endpoints, keyed on
   `X-Forwarded-For`. `Caddyfile` **overwrites** that header with `{remote_host}`
   rather than appending, so a client cannot spoof its own address. Register is
-  capped at 20/hour. `RATE_LIMIT_ENABLED=0` disables the limiter.
+  capped at 20/hour. `LIMITS` is keyed on exact paths; `PREFIX_LIMITS` covers the
+  routes whose last segment is an id, and the counter is keyed on the prefix
+  rather than the path so a fresh id does not buy a fresh counter.
+  `RATE_LIMIT_ENABLED=0` disables the limiter.
 - The WebSocket authenticates with an `Authorization: Bearer` header, not a query
   parameter, so the token never lands in an access log. A bad or expired token
   closes with application code **4401**.
@@ -669,7 +686,7 @@ replace it at first sign-in: login answers `must_change_password` with a
 the operator loses the password before handing it over, delete the account and
 make another — only a hash is stored.
 
-`pytest -q` → **156 passed**. `scripts/e2e.py` → **56/56 passed**.
+`pytest -q` → **207 passed**. `scripts/e2e.py` → **56/56 passed**.
 `./gradlew :app:testDebugUnitTest` → **33 passed**. `./gradlew :app:lintDebug` →
 **0 errors**, 45 warnings.
 
@@ -679,11 +696,11 @@ make another — only a hash is stored.
 | `test_proximity.py` | Alert round trip, leaving the radius, disconnect cleanup, frame validation, the 30 s expiry sweep, the GEO query, and that alerts carry no coordinates |
 | `test_privacy.py` | Bearing cardinal directions, quantisation snapping, the error bound, the zero-quantum escape hatch |
 | `test_security.py` | Password reset (send, single use, wrong code, attempt cap, no enumeration), account deletion, refresh replay grace vs. revocation, config validation, cache headers |
-| `test_ratelimit.py` | Per-address throttling, per-address isolation, health exempt, limiter can be disabled |
+| `test_ratelimit.py` | Per-address throttling, per-address isolation, health exempt, limiter can be disabled, and the `/blocks/` prefix bucket shared across ids |
 | `test_invites.py` | The gate, single use, refund on a taken email, and that a taken and a free address are indistinguishable without a code |
 | `test_admin.py` | The admin/walker token boundary in both directions, admin lockout, user listing and paging, account creation and the forced password change it triggers, revoke and delete, invite minting, the audit log, and that no admin response carries a position |
 | `test_admin_ui.py` | The admin cookie (HttpOnly, SameSite, path), redirects without one, the add-account form and its errors, the one-shot password notice, the delete confirmation page, the one-shot mint flash, and that no page mentions a coordinate |
-| `test_blocks.py` | Blocking a walker: symmetric invisibility in both directions, unblock, the name kept for an offline walker, blocking yourself, a block surviving a new session, and that deleting an account clears it from other block lists |
+| `test_blocks.py` | Blocking a walker: symmetric invisibility in both directions, unblock, the name kept for an offline walker, blocking yourself, a block surviving a new session, the 200-entry ceiling and its 409, and that deleting an account clears it from other block lists |
 
 `scripts/e2e.py` covers token rejection (missing and malformed), welcome frames,
 bidirectional alerts at 100 m, name propagation, clear at 800 m, re-entry
@@ -711,7 +728,7 @@ throwaway account derived from `--email`.
 
 - `docker compose up -d --build` builds and runs clean; Redis healthcheck gates
   the backend start.
-- `pytest -q` → 156 passed.
+- `pytest -q` → 207 passed.
 - `scripts/e2e.py` → 56/56 passed against real Redis.
 - `https://localhost:8443/health` → 200 through Caddy, with a certificate issued
   by the local CA for both `localhost` and `10.0.2.2`.
@@ -1130,7 +1147,7 @@ this state. Re-run the gates to confirm the baseline before starting new work �
 
 ```bash
 cd /c/Users/thoma/Downloads/dog/backend
-.venv/Scripts/python.exe -m pytest -q                    # expect 156 passed
+.venv/Scripts/python.exe -m pytest -q                    # expect 207 passed
 .venv/Scripts/python.exe scripts/e2e.py                  # expect 56/56
 .venv/Scripts/python.exe -m ruff check --select F,E9 app/ tests/ scripts/
 ```

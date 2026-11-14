@@ -24,6 +24,16 @@ that quietly expired after a month would be worse than no block at all.
 BLOCKS_KEY = "dogwalk:blocks:{}"
 BLOCKED_BY_KEY = "dogwalk:blocked_by:{}"
 
+# A block list is a personal setting, not a feed. The ceiling exists because
+# every block also writes a key for the blocked id, and an id that never
+# belonged to an account is cleaned up by nothing except an unblock. Without a
+# limit, a signed-in account could mint keys until Redis ran out of memory.
+MAX_BLOCKS = 200
+
+
+class BlockListFull(Exception):
+    """The walker already has ``MAX_BLOCKS`` entries."""
+
 
 def _blocks_key(walker_id: str) -> str:
     return BLOCKS_KEY.format(walker_id)
@@ -38,12 +48,23 @@ async def block(redis, blocker_id: str, blocked_id: str, name: str = "") -> None
 
     Idempotent: blocking twice leaves the same two keys, and re-blocking with a
     fresh name updates the name the settings list shows.
+
+    Raises ``BlockListFull`` once the blocker holds ``MAX_BLOCKS`` entries. The
+    check is not atomic with the write below, so two concurrent blocks can
+    overshoot by one; a soft ceiling is enough, because the point is that the
+    number is bounded rather than that it is exact.
     """
     if blocker_id == blocked_id:
         raise ValueError("cannot block yourself")
 
+    key = _blocks_key(blocker_id)
+    # Re-blocking an existing entry only updates its name, so it must not count
+    # against the ceiling.
+    if await redis.hlen(key) >= MAX_BLOCKS and not await redis.hexists(key, blocked_id):
+        raise BlockListFull(f"a block list holds at most {MAX_BLOCKS} walkers")
+
     async with redis.pipeline(transaction=True) as pipe:
-        pipe.hset(_blocks_key(blocker_id), blocked_id, name)
+        pipe.hset(key, blocked_id, name)
         pipe.sadd(_blocked_by_key(blocked_id), blocker_id)
         await pipe.execute()
 

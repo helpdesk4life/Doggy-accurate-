@@ -151,11 +151,11 @@ cd backend
 | `test_proximity.py` | Alert round trip, leaving the radius, disconnect cleanup, frame validation, the 30 s expiry sweep, the GEO query, and that alerts carry no coordinates |
 | `test_privacy.py` | Bearing cardinal directions, quantisation snapping, the error bound, the zero-quantum escape hatch |
 | `test_security.py` | Password reset (send, single use, wrong code, attempt cap, no enumeration), account deletion, refresh replay grace vs. revocation, config validation, cache headers |
-| `test_ratelimit.py` | Per-address throttling, per-address isolation, health exempt, limiter can be disabled |
+| `test_ratelimit.py` | Per-address throttling, per-address isolation, health exempt, limiter can be disabled, and the `/blocks/` prefix bucket shared across ids |
 | `test_invites.py` | The gate, single use, refund on a taken email, and that a taken and a free address are indistinguishable without a code |
 | `test_admin.py` | The token boundary in both directions, admin lockout, user listing and paging, account creation and the forced password change it triggers, revoke and delete, invite minting, the audit log, and that no admin response carries a position |
 | `test_admin_ui.py` | The cookie (HttpOnly, SameSite, path), redirects without one, the add-account form and its errors, the one-shot password notice, the confirmation page, the one-shot mint flash, and that no page mentions a coordinate |
-| `test_blocks.py` | Blocking a walker: symmetric invisibility in both directions, unblock, the name kept for an offline walker, blocking yourself, a block surviving a new session, and that deleting an account clears it from other block lists |
+| `test_blocks.py` | Blocking a walker: symmetric invisibility in both directions, unblock, the name kept for an offline walker, blocking yourself, a block surviving a new session, the 200-entry ceiling and its 409, and that deleting an account clears it from other block lists |
 
 `scripts/e2e.py` runs 56 checks against the live stack, including token
 rejection, the full proximity cycle, the coordinate-free alert shape, the
@@ -215,10 +215,16 @@ unreachable until you sign in.
   | `/auth/password-reset/request` | 3 / hour |
   | `/auth/password-reset/confirm` | 10 / hour |
   | `/auth/account` | 5 / hour |
+  | `/blocks/{id}` | 60 / min |
 
   Fixed windows, so a burst can straddle a boundary and get two windows' worth.
   That is the right cost for a control that exists to blunt automated abuse
   rather than to meter traffic. `RATE_LIMIT_ENABLED=0` turns it off.
+
+  `/blocks/{id}` is the one prefix bucket (`PREFIX_LIMITS`): the counter is keyed
+  on `/blocks/`, not on the full path, because a bucket per id would give every
+  id its own counter and amount to no limit at all. `GET /blocks` is not
+  throttled — it reads the caller's own setting.
 - **The walker id is the account id, taken from the token.** A client cannot
   claim to be someone else by editing a query string.
 

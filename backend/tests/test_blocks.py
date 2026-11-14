@@ -159,6 +159,39 @@ def test_forget_clears_both_directions(redis_client):
     asyncio.run(scenario())
 
 
+def test_a_block_list_has_a_ceiling(redis_client):
+    """Every block writes a key for the blocked id, so the list has to be bounded.
+
+    An id that never belonged to an account is cleaned up by nothing except an
+    unblock, which is why the ceiling is on the list rather than on the account.
+    """
+
+    async def scenario():
+        for index in range(blocks.MAX_BLOCKS):
+            await blocks.block(redis_client, ALICE, f"{index:032x}", f"Walker {index}")
+
+        with pytest.raises(blocks.BlockListFull):
+            await blocks.block(redis_client, ALICE, "f" * 32, "One too many")
+
+        assert len(await blocks.blocked_by_me(redis_client, ALICE)) == blocks.MAX_BLOCKS
+
+    asyncio.run(scenario())
+
+
+def test_reblocking_at_the_ceiling_still_updates_the_name(redis_client):
+    """Re-blocking writes no new entry, so it must not be refused."""
+
+    async def scenario():
+        for index in range(blocks.MAX_BLOCKS):
+            await blocks.block(redis_client, ALICE, f"{index:032x}", f"Walker {index}")
+
+        await blocks.block(redis_client, ALICE, f"{0:032x}", "Renamed")
+
+        assert (f"{0:032x}", "Renamed") in await blocks.blocked_by_me(redis_client, ALICE)
+
+    asyncio.run(scenario())
+
+
 # --- enforcement -------------------------------------------------------------
 
 
@@ -294,6 +327,23 @@ def test_blocking_an_unknown_walker_does_not_reveal_that_it_is_unknown(client):
     response = client.post(f"/blocks/{'f' * 32}", json={"name": "Ghost"}, headers=alice_headers)
 
     assert response.status_code == 204
+
+
+def test_a_full_block_list_answers_409(client):
+    """The ceiling is reported as a property of the caller's own list.
+
+    It says nothing about the id being blocked, so it is not the oracle that a
+    404 would be.
+    """
+    _, alice_headers = sign_up(client, "alice@example.com")
+
+    for index in range(blocks.MAX_BLOCKS):
+        response = client.post(f"/blocks/{index:032x}", json={"name": "x"}, headers=alice_headers)
+        assert response.status_code == 204
+
+    response = client.post(f"/blocks/{'f' * 32}", json={"name": "Ghost"}, headers=alice_headers)
+
+    assert response.status_code == 409
 
 
 def test_a_block_survives_a_new_session(client):

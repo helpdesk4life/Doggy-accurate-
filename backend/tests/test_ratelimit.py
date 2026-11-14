@@ -39,6 +39,13 @@ def login(client, index: int, address: str | None = None):
     )
 
 
+def sign_up(client, email: str) -> dict:
+    """Register a walker and return auth headers."""
+    response = client.post("/auth/register", json={"email": email, "password": PASSWORD})
+    assert response.status_code == 201, response.text
+    return {"Authorization": f"Bearer {response.json()['access_token']}"}
+
+
 def test_login_is_throttled_per_address(client, frozen_window):
     limit = ratelimit.LIMITS["/auth/login"]
 
@@ -111,3 +118,38 @@ def test_a_window_boundary_resets_the_counter(client, frozen_window):
     frozen_window.advance(limit.window_seconds)
 
     assert login(client, limit.requests + 1).status_code == 401
+
+
+# --- prefix buckets ----------------------------------------------------------
+
+
+def test_match_prefers_an_exact_path():
+    assert ratelimit.match("/auth/login") == ("/auth/login", ratelimit.LIMITS["/auth/login"])
+
+
+def test_match_falls_back_to_a_prefix():
+    bucket, limit = ratelimit.match("/blocks/" + "a" * 32)
+
+    assert bucket == "/blocks/"
+    assert limit is ratelimit.PREFIX_LIMITS["/blocks/"]
+
+
+def test_match_ignores_unlisted_paths():
+    assert ratelimit.match("/health") is None
+    # The list itself is a read of the caller's own setting, not a write.
+    assert ratelimit.match("/blocks") is None
+
+
+def test_blocking_is_throttled_across_ids(client, frozen_window):
+    """The bucket is the prefix, so a fresh id does not buy a fresh counter."""
+    limit = ratelimit.PREFIX_LIMITS["/blocks/"]
+    headers = sign_up(client, "alice@example.com")
+
+    for index in range(limit.requests):
+        response = client.post(f"/blocks/{index:032x}", json={"name": "x"}, headers=headers)
+        assert response.status_code == 204
+
+    blocked = client.post(f"/blocks/{'f' * 32}", json={"name": "x"}, headers=headers)
+
+    assert blocked.status_code == 429
+    assert int(blocked.headers["retry-after"]) > 0

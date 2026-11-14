@@ -49,6 +49,32 @@ LIMITS: dict[str, Limit] = {
     "/admin/ui/login": Limit(10, 60),
 }
 
+# Keyed by path prefix, for routes whose last segment is an id. The bucket is
+# the prefix rather than the full path: bucketing on the id would hand every id
+# its own counter, which is the same as no limit at all.
+PREFIX_LIMITS: dict[str, Limit] = {
+    # Blocking writes two Redis keys per call and accepts any 32-hex id, so the
+    # ceiling in ``blocks.MAX_BLOCKS`` bounds one account and this bounds how
+    # fast an account can get there.
+    "/blocks/": Limit(60, 60),
+}
+
+
+def match(path: str) -> tuple[str, Limit] | None:
+    """The bucket and limit for ``path``, or ``None`` when it is not throttled.
+
+    Exact paths win over prefixes so a specific route can be tightened without
+    being shadowed by a broader rule.
+    """
+    limit = LIMITS.get(path)
+    if limit is not None:
+        return path, limit
+
+    for prefix, prefix_limit in PREFIX_LIMITS.items():
+        if path.startswith(prefix):
+            return prefix, prefix_limit
+    return None
+
 
 def client_identity(request: Request) -> str:
     """The address to bill this request to.
@@ -83,15 +109,16 @@ def install(app) -> None:
 
     @app.middleware("http")
     async def rate_limit(request: Request, call_next):
-        limit = LIMITS.get(request.url.path)
-        if limit is None or request.method == "OPTIONS":
+        matched = match(request.url.path)
+        if matched is None or request.method == "OPTIONS":
             return await call_next(request)
+        bucket, limit = matched
 
         redis = getattr(request.app.state, "redis", None)
         if redis is None:
             return await call_next(request)
 
-        retry_after = await check(redis, client_identity(request), request.url.path, limit)
+        retry_after = await check(redis, client_identity(request), bucket, limit)
         if retry_after:
             return JSONResponse(
                 status_code=429,

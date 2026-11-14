@@ -7,6 +7,9 @@ changed, so the effect is immediate instead of waiting for the next GPS fix.
 Blocking never reports whether the id exists. A 404 for an unknown walker would
 turn this into an account-existence oracle, and the client only ever blocks
 someone it just saw on the map, so there is nothing to gain from being precise.
+The 409 for a full list is not an exception to that: it describes the caller's
+own list, not the id, and it is the only thing standing between a signed-in
+account and an unbounded number of Redis keys.
 """
 
 from fastapi import APIRouter, HTTPException, Path, Request, Response
@@ -96,7 +99,11 @@ async def block_walker(
     if walker_id == user["user_id"]:
         raise HTTPException(status_code=400, detail="cannot block yourself")
 
-    await blocks.block(_redis(request), user["user_id"], walker_id, body.name)
+    try:
+        await blocks.block(_redis(request), user["user_id"], walker_id, body.name)
+    except blocks.BlockListFull:
+        raise HTTPException(status_code=409, detail="block list is full")
+
     await _refresh(request, {user["user_id"], walker_id})
     return Response(status_code=204)
 
