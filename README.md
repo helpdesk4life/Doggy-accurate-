@@ -104,7 +104,7 @@ cd backend
 .venv/Scripts/python -m pytest -q
 ```
 
-129 tests. They run against `fakeredis`, so no Redis server is needed.
+156 tests. They run against `fakeredis`, so no Redis server is needed.
 
 | File | Covers |
 | --- | --- |
@@ -116,6 +116,7 @@ cd backend
 | `test_invites.py` | The gate, single use, refund on a taken email, and that a taken and a free address are indistinguishable without a code |
 | `test_admin.py` | The token boundary in both directions, admin lockout, user listing and paging, account creation and the forced password change it triggers, revoke and delete, invite minting, the audit log, and that no admin response carries a position |
 | `test_admin_ui.py` | The cookie (HttpOnly, SameSite, path), redirects without one, the add-account form and its errors, the one-shot password notice, the confirmation page, the one-shot mint flash, and that no page mentions a coordinate |
+| `test_blocks.py` | Blocking a walker: symmetric invisibility in both directions, unblock, the name kept for an offline walker, blocking yourself, a block surviving a new session, and that deleting an account clears it from other block lists |
 
 `scripts/e2e.py` runs 56 checks against the live stack, including token
 rejection, the full proximity cycle, the coordinate-free alert shape, the
@@ -321,14 +322,23 @@ audits.
 
 The panel is served by the same FastAPI process, so it is reachable wherever the
 backend is. Through Caddy that means adding the admin hostname to the site line
-in `backend/Caddyfile` — the same `default_sni` caveat as the app applies. For
-anything beyond a trusted network, put Caddy's `basic_auth` or an IP allowlist
-in front of `/admin/*` as a second gate.
+in `backend/Caddyfile` — the same `default_sni` caveat as the app applies. On the
+VPS this is already done: `deploy/Caddyfile` puts `basic_auth` on `/admin*` ahead
+of the app's own login, so an unauthenticated request gets 401. For a deployment
+of your own, do the same — `basic_auth` or an IP allowlist as a second gate.
 
 ## TLS
 
-`wss://` terminates at Caddy, which mints its own local CA with `tls internal`.
-No domain and no internet needed.
+Two setups, deliberately different.
+
+**Production** is the VPS: `deploy/Caddyfile` serves `backend.thomasfeyens.be`
+and `maps.thomasfeyens.be` with Let's Encrypt certificates that Caddy issues and
+renews itself. No `tls internal` and no `default_sni`, because a real hostname
+sends SNI. `deploy/verify.sh` asserts the issuer, so a regression to the local CA
+fails a check.
+
+**Local development** is what the rest of this section describes: Caddy mints its
+own CA with `tls internal`, so no domain and no internet are needed.
 
 ```
 app ──wss://10.0.2.2:8443──▶ Caddy ──http──▶ backend:8000

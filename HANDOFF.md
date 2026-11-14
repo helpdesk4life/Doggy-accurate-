@@ -1,13 +1,14 @@
 # Handoff — DogWalk
 
-State captured at the end of the admin-panel session (2026-11-12). Read this
+State captured at the end of the blocking session (2026-11-14). Read this
 first when picking the project back up. For what to build next, see
 `ROADMAP.md`; for the iOS plan in full, `IOS-PORT.md`; for the iOS code that
 exists, `ios/README.md`.
 
-**The admin panel is committed** as `e5ed2ad admin pagina en account creation`,
-on top of `7d26413 Eerste versie`. The tree is clean. See **What landed in
-`e5ed2ad`** at the bottom for what that commit contains.
+**The tree is clean and deployed to the VPS**, where `deploy/verify.sh` passes
+12/12. The admin panel landed earlier as `e5ed2ad admin pagina en account
+creation`, on top of `7d26413 Eerste versie`; see **What landed in `e5ed2ad`** at
+the bottom for what that commit contains.
 
 ## What this project is
 
@@ -19,19 +20,19 @@ another dog comes within a configurable distance.
 
 ## Current state
 
-Everything below was verified running on 2026-11-12. If the machine has been
+Everything below was verified running on 2026-11-14. If the machine has been
 rebooted, see **Resuming** instead.
 
 | Thing | State |
 | --- | --- |
-| `backend-backend-1` | Up, `127.0.0.1:8000` (loopback only) |
-| `backend-redis-1` | Up (healthy), `0.0.0.0:6379`, AOF on, `redis-data` volume |
+| `backend-backend-1` | Up (healthy), `127.0.0.1:8000` (loopback only) |
+| `backend-redis-1` | Up (healthy), `127.0.0.1:6379` (loopback only), AOF on, `redis-data` volume |
 | `backend-caddy-1` | Up, `0.0.0.0:8443`, `caddy-data` volume |
 | Admin panel | Up at `/admin/ui`, operator `operator@example.com` / `operator-password` |
 | Emulator | `Medium_Phone_API_37.0`, running as `emulator-5554` |
 | App | Signed out at the login screen, on the VPS-default build. `fresh@example.com` is local-Redis only, so it cannot sign in against the VPS — see **Resuming** for the local-stack recipe. |
 
-Redis holds 8 accounts, 46 unused invites and 27 used ones. One account,
+Redis holds 26 accounts, 75 unused invites and 46 used ones. One account,
 `tokke@test.be`, was created through the panel and **has never completed its
 first sign-in** — `must_change_password` is still `1` and its generated password
 was shown once and is gone. Delete and recreate it, or use the reset flow, before
@@ -41,8 +42,14 @@ Accounts live in Redis under `dogwalk:users:*`, so they survive a stack restart
 now that Redis has a volume. The geo index is disposable and is rebuilt from the
 next fix.
 
-The backend port is published on `127.0.0.1`, not `0.0.0.0`, so the plaintext port
-is not reachable from the LAN. Caddy on `8443` is the only way in from outside.
+Both published ports are on `127.0.0.1`, not `0.0.0.0`, so neither the plaintext
+backend port nor Redis is reachable from the LAN. Caddy on `8443` is the only way
+in from outside.
+
+The VPS (`207.180.240.29`) is the production target: same two containers plus a
+host Caddy, running the blocking release with a clean tree, and
+`deploy/verify.sh` passes 12/12 there. It pulls from `github`, not `origin`, and
+`git` must run as `thomas` — root has no deploy key. See `deploy/VPS.md`.
 
 ## Resuming
 
@@ -260,7 +267,7 @@ Marking a dog as liked or disliked is stored in `SharedPreferences` under
 `marked_dogs` and **never sent to the server**. The backend has no concept of a
 relationship, so the social graph cannot leak from Redis even if the store were
 dumped. The whole feature is Android-only; `pytest -q` stayed at 71 passed
-(then — 129 now).
+(then — 156 now).
 
 Where it lives:
 
@@ -550,8 +557,16 @@ index existed do not appear until you run
 
 ## TLS
 
-`wss://` terminates at Caddy, which mints its own local CA with `tls internal`.
-No domain and no internet needed.
+Two setups, deliberately different.
+
+**Production** is the VPS: `deploy/Caddyfile` serves `backend.thomasfeyens.be`
+and `maps.thomasfeyens.be` with Let's Encrypt certificates that Caddy issues and
+renews itself. No `tls internal` and no `default_sni`, because a real hostname
+sends SNI. `deploy/verify.sh` asserts the issuer, so a regression to the local CA
+fails a check.
+
+**Local development** is what the rest of this section describes: Caddy mints its
+own CA with `tls internal`, so no domain and no internet are needed.
 
 ```
 app ──wss://10.0.2.2:8443──▶ Caddy ──http──▶ backend:8000
@@ -654,8 +669,8 @@ replace it at first sign-in: login answers `must_change_password` with a
 the operator loses the password before handing it over, delete the account and
 make another — only a hash is stored.
 
-`pytest -q` → **129 passed**. `scripts/e2e.py` → **56/56 passed**.
-`./gradlew :app:testDebugUnitTest` → **29 passed**. `./gradlew :app:lintDebug` →
+`pytest -q` → **156 passed**. `scripts/e2e.py` → **56/56 passed**.
+`./gradlew :app:testDebugUnitTest` → **33 passed**. `./gradlew :app:lintDebug` →
 **0 errors**, 45 warnings.
 
 | Test file | Covers |
@@ -668,6 +683,7 @@ make another — only a hash is stored.
 | `test_invites.py` | The gate, single use, refund on a taken email, and that a taken and a free address are indistinguishable without a code |
 | `test_admin.py` | The admin/walker token boundary in both directions, admin lockout, user listing and paging, account creation and the forced password change it triggers, revoke and delete, invite minting, the audit log, and that no admin response carries a position |
 | `test_admin_ui.py` | The admin cookie (HttpOnly, SameSite, path), redirects without one, the add-account form and its errors, the one-shot password notice, the delete confirmation page, the one-shot mint flash, and that no page mentions a coordinate |
+| `test_blocks.py` | Blocking a walker: symmetric invisibility in both directions, unblock, the name kept for an offline walker, blocking yourself, a block surviving a new session, and that deleting an account clears it from other block lists |
 
 `scripts/e2e.py` covers token rejection (missing and malformed), welcome frames,
 bidirectional alerts at 100 m, name propagation, clear at 800 m, re-entry
@@ -695,7 +711,7 @@ throwaway account derived from `--email`.
 
 - `docker compose up -d --build` builds and runs clean; Redis healthcheck gates
   the backend start.
-- `pytest -q` → 129 passed.
+- `pytest -q` → 156 passed.
 - `scripts/e2e.py` → 56/56 passed against real Redis.
 - `https://localhost:8443/health` → 200 through Caddy, with a certificate issued
   by the local CA for both `localhost` and `10.0.2.2`.
@@ -789,10 +805,23 @@ throwaway account derived from `--email`.
   path and not from the walker leaving the radius. Back to 60 m: notification
   returned, so re-entry still alerts. Stopping the walk cleared both `2001` and
   the foreground `1001`.
+- **Blocking a walker, end to end on `emulator-5554`**: the other walker was
+  visible and alerting → blocked from the tap-a-dog dialog → gone from the map,
+  and the other socket stopped receiving `PROXIMITY_ALERT` and got
+  `PROXIMITY_CLEAR` instead, so the filter runs before the frame is built rather
+  than in the UI. Settings listed the walker under **Blocked walkers**; unblocking
+  restored both directions; the block survived `pm clear`.
+- **Blocking on the VPS over `wss://backend.thomasfeyens.be`**, with two real
+  sockets: both walkers saw each other → `POST /blocks` 204 → both received
+  `PROXIMITY_CLEAR` → `GET /blocks` 200 carrying the name → `DELETE` 204 → both
+  visible again. `GET /blocks` answers 401 unauthenticated, which is how the route
+  was confirmed live after the deploy.
+- **`deploy/verify.sh` on the VPS**: 12/12 PASS, including the Let's Encrypt
+  issuer check and a 206 range request against `benelux.pmtiles`.
 
 ## Android tests
 
-29 JVM tests in `android/app/src/test/`, run with
+33 JVM tests in `android/app/src/test/`, run with
 `./gradlew :app:testDebugUnitTest`. No emulator, no backend, no Robolectric.
 
 | File | Covers |
@@ -800,6 +829,7 @@ throwaway account derived from `--email`.
 | `data/auth/AuthStoreTest.kt` | The sign-in state machine: save, updateTokens, clear, and the three restore cases |
 | `data/repository/WalkRepositoryTest.kt` | Proximity bookkeeping (arrival once, not per fix; withdrawal on the last leaving and on a clear frame) and the three session-renewal branches |
 | `data/remote/WalkSocketClientTest.kt` | Connect, bearer header, name query parameter, frame decoding, 4401, reconnect, disconnect, the backoff ladder |
+| `data/remote/HttpBaseTest.kt` | `httpBaseOf()`: `ws` → `http`, `wss` → `https`, the query string dropped, and a URL without the socket path used as-is |
 | `testing/InMemorySecureStore.kt` | Shared fake, not a test |
 
 Six things about the setup that will cost time if undone:
@@ -885,9 +915,16 @@ GitHub Actions, on `github.com/helpdesk4life/doggy` (private). The first run,
 The two `skipped` steps in that run — `Upload reports` and `Dump container logs`
 — are both `if: failure()`, so skipping is the correct outcome on a green run.
 
+The suite has grown since: 156 backend tests and 33 Android tests as of the
+2026-11-14 doc sync. That run is the last one confirmed green from here — the
+GitHub connector exposes no workflow-run status, so check the Actions tab after a
+push rather than assuming.
+
 `origin` is still the self-hosted Gitea at `192.168.3.70:2222`, a private address
 the VPS cannot reach. `github` is the remote that matters: it is what CI watches
-and what the server clones from. Push to both, or drop `origin`.
+and what the server clones from. Push to both, or drop `origin` — as of
+2026-11-14 it is behind `main` and drifts further with every push that only goes
+to `github`.
 
 `.github/dependabot.yml` bumps the action majors weekly. They move: `checkout` went
 v5 → v7 while this project has existed, and a deprecated major fails the run rather
@@ -936,12 +973,12 @@ next person meets it as a passing test rather than a mystery failure.
 
 ## Known gaps
 
-- **The Android tests cover the transport, the session and the auth store, not
-  the rest.** 29 tests: `WalkSocketClient` (connect, bearer header, frame
-  decoding, 4401, reconnect, the backoff ladder), `WalkRepository` (proximity
-  bookkeeping and the session-renewal branches) and `AuthStore` (the sign-in
-  state machine). `SettingsStore`, `NotificationHelper` and the Compose UI have
-  none.
+- **The Android tests cover the transport, the session, the repository and the
+  auth store, not the rest.** 33 tests: `WalkSocketClient` (connect, bearer
+  header, frame decoding, 4401, reconnect, the backoff ladder), `WalkRepository`
+  (proximity bookkeeping and the session-renewal branches), `AuthStore` (the
+  sign-in state machine) and `HttpBase` (the `ws` → `http` mapping). `SettingsStore`,
+  `NotificationHelper` and the Compose UI have none.
 - No reconnect backoff tuning — the client reconnects, but the retry cadence has
   not been stress-tested against a backend that stays down.
 - **The proximity alert is withdrawn when the last walker leaves the warning
@@ -955,9 +992,11 @@ next person meets it as a passing test rather than a mystery failure.
   price of keeping the social graph off the server, and it is the right trade for
   now — but if it ever needs to sync across devices, it needs a server-side store
   and a privacy decision to go with it.
-- **Marking is not blocking.** A disliked dog still receives your bearing and
-  distance; only the colour and the sound change. Real blocking has to filter the
-  neighbour list server-side. See `ROADMAP.md` P3.
+- ~~**Marking is not blocking.**~~ Closed: marking is still local and cosmetic,
+  but blocking is now real and server-side. `app/blocks.py` keeps a hash of who
+  you blocked and a set of who blocked you, and `refresh_neighborhood` drops the
+  union before the frame is built, so a blocked walker never receives your
+  bearing. Symmetric on purpose. See **Blocking** above.
 - **Invite codes are the only thing closing account enumeration.** Anyone holding
   a code can still probe addresses, and a leaked code is a leaked invitation.
   Email verification is the general fix; until then keep `INVITE_REQUIRED=1` and
@@ -966,13 +1005,14 @@ next person meets it as a passing test rather than a mystery failure.
   the backend now refuses to boot with it unless `ALLOW_LOGGING_EMAIL=1` says so
   explicitly — see `Settings.validate()`. The real fix is still a provider:
   implement `EmailSender`, add it to `email.build_sender`, set `EMAIL_SENDER`.
-- **The admin panel has no second gate.** It is protected by the operator password
-  and nothing else. For anything beyond a trusted network, put Caddy's
-  `basic_auth` or an IP allowlist in front of `/admin/*`. The lockout is tighter
-  than the walker one on purpose — 5 failures in 15 minutes, because a handful of
-  operator accounts can each delete every account in the deployment — but there is
-  no password-change flow for operators, so `scripts/create_admin.py` is the only
-  way to set one.
+- ~~**The admin panel has no second gate.**~~ Closed: `deploy/Caddyfile` puts
+  Caddy `basic_auth` on `/admin*` (user `thomas`) ahead of the app's own login, and
+  an unauthenticated request gets 401. The hash is bcrypt — rotate it with
+  `caddy hash-password` and reload. The app's own lockout is tighter than the
+  walker one on purpose — 5 failures in 15 minutes, because a handful of operator
+  accounts can each delete every account in the deployment — but there is still no
+  password-change flow for operators, so `scripts/create_admin.py` is the only way
+  to set one.
 - **A generated password is unrecoverable by design.** If the operator loses it
   before handover, the account must be deleted and recreated. Worth a "copy"
   button on the notice if this ever gets used by someone other than you.
@@ -1081,13 +1121,13 @@ Modified: `backend/app/{auth,config,main,ratelimit,routes_auth,users}.py`,
 auth files plus `strings.xml`, and `README.md` / `ROADMAP.md` / `HANDOFF.md` /
 `IOS-PORT.md`.
 
-The counts in `README.md` and `ROADMAP.md` (129 tests, 56 e2e checks) describe
+The counts in `README.md` and `ROADMAP.md` (156 tests, 56 e2e checks) describe
 this state. Re-run the gates to confirm the baseline before starting new work —
 `pytest` needs nothing, `e2e.py` needs the Docker stack up (see **Resuming**):
 
 ```bash
 cd /c/Users/thoma/Downloads/dog/backend
-.venv/Scripts/python.exe -m pytest -q                    # expect 129 passed
+.venv/Scripts/python.exe -m pytest -q                    # expect 156 passed
 .venv/Scripts/python.exe scripts/e2e.py                  # expect 56/56
 .venv/Scripts/python.exe -m ruff check --select F,E9 app/ tests/ scripts/
 ```

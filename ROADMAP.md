@@ -23,7 +23,7 @@ export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
 
 # 4. Confirm nothing regressed
 cd /c/Users/thoma/Downloads/dog/backend
-./.venv/Scripts/python.exe -m pytest -q          # expect 129 passed
+./.venv/Scripts/python.exe -m pytest -q          # expect 156 passed
 ./.venv/Scripts/python.exe scripts/e2e.py        # expect 56/56
 ```
 
@@ -210,17 +210,20 @@ working, which defeats the point of generating one. Test count went from 123 to
 
 ## Deferred — deliberately, per the friends-and-family scope
 
-These are the two P1 items we chose not to do. They are not forgotten; they are
-gated on a decision to go public.
+One P1 item is left undone. It is not forgotten; it is gated on a decision to go
+public.
 
-### 7. Production TLS is still the local CA
+### 7. ~~Production TLS is still the local CA~~ — done
 
-Caddy uses `tls internal`, which is right for development and wrong for
-production. A real deployment needs a domain, Let's Encrypt, and the
-`default_sni` workaround removed (a real hostname sends SNI, so the workaround
-becomes unnecessary).
+Closed on 2026-11-14. The VPS serves `backend.thomasfeyens.be` and
+`maps.thomasfeyens.be` from Let's Encrypt, issued and renewed by Caddy itself.
+`deploy/Caddyfile` carries no `tls internal` and no `default_sni`, because a real
+hostname sends SNI and the workaround is unnecessary. `deploy/verify.sh` asserts
+the issuer, so a regression to the local CA fails a check instead of waiting to
+be noticed.
 
-**Trigger to do this:** the first user who is not on your LAN.
+The local `backend/Caddyfile` still uses `tls internal` on `:8443`. That is the
+emulator's path to `wss://10.0.2.2:8443` and is meant to stay.
 
 ### 8. The backend is single-instance
 
@@ -237,18 +240,18 @@ deploy mid-evening annoys someone.
 
 ## P2 — quality, before or shortly after launch
 
-- **Android tests cover two classes.** 19 tests now exist for `WalkSocketClient`
-  and `AuthStore`. `WalkRepository` is the next target and the most valuable one,
-  because it holds the proximity and session-renewal logic — but it takes a
-  concrete `SettingsStore`, which needs a `Context`, so that class has to go
-  behind an interface first. `NotificationHelper` and the Compose UI have no
-  tests at all.
+- **Android tests cover four classes.** 33 tests: `WalkSocketClient`,
+  `WalkRepository`, `AuthStore` and `HttpBase`. `WalkRepository` was the valuable
+  one and is done — it runs on three interfaces (`WalkSettings`, `WalkTransport`,
+  `TokenRefresher`), so it needs no `Context`. `SettingsStore`,
+  `NotificationHelper` and the Compose UI still have no tests at all.
 - **CI is green but cannot gate anything.** `.github/workflows/ci.yml` runs all
   three jobs on every push and passed on `9bd0114` (134 backend tests, 56/56 e2e,
-  Android tests + lint). But `main` has no branch protection: GitHub refuses it on
-  a private repo without Pro (`403 Upgrade to GitHub Pro`), so a red run does not
-  block a merge. Nothing deploys either — the VPS pulls by hand. See
-  **CI → Where it runs** in `HANDOFF.md`.
+  Android tests + lint). The suite has since grown to 156 backend tests and 33
+  Android tests as of the 2026-11-14 doc sync. But `main` has no branch
+  protection: GitHub refuses it on a private repo without Pro (`403 Upgrade to
+  GitHub Pro`), so a red run does not block a merge. Nothing deploys either — the
+  VPS pulls by hand. See **CI → Where it runs** in `HANDOFF.md`.
 - **Reconnect backoff is untested.** The client backs off 1 s → 30 s, but nobody
   has run it against a backend that stays down for minutes. Worth a manual pass
   and then a test.
@@ -311,12 +314,21 @@ class in `AppModule` — and ten tests pin the proximity bookkeeping (arrive onc
 not per fix; withdraw when the last dog leaves) and the three session-renewal
 branches (refresh, refusal, no token).
 
-**Blocking a walker is in.** The one social signal that could not stay on the
-device: `app/blocks.py` keeps a hash of who you blocked and a set of who blocked
-you, `refresh_neighborhood` drops the union before building the frame, and
-`GET`/`POST`/`DELETE /blocks` drives it. Symmetric on purpose — blocking hides
-you from them as well — and it survives a reinstall because it lives in Redis.
-Verified on the emulator, including after `pm clear`.
+**Blocking a walker is in and deployed.** The one social signal that could not
+stay on the device: `app/blocks.py` keeps a hash of who you blocked and a set of
+who blocked you, `refresh_neighborhood` drops the union before building the
+frame, and `GET`/`POST`/`DELETE /blocks` drives it. Symmetric on purpose —
+blocking hides you from them as well — and it survives a reinstall because it
+lives in Redis. Verified on the emulator, including after `pm clear`, and on the
+VPS over `wss://backend.thomasfeyens.be` with two real sockets: both visible →
+`POST /blocks` 204 → both `PROXIMITY_CLEAR` → `DELETE` 204 → both visible again.
+`deploy/verify.sh` passes 12/12 on the box.
+
+**The docs were resynced on 2026-11-14.** Seven claims had drifted from the code:
+production TLS was recorded as still on the local CA, blocking was recorded as
+not existing, the admin panel was recorded as having no second gate, and four
+test counts were stale. All corrected against a full gate run — 156 backend
+tests, 56/56 e2e, 33 Android tests, 0 lint errors, 12/12 on the VPS.
 
 The next visible thing is **walk history and stats** (P3): distance, duration and
 dogs met are all derivable from what the app already receives, and it is the
@@ -331,8 +343,8 @@ All three from last session are answered and implemented:
 1. ~~Coordinate precision~~ → **distance and bearing only**, quantised to 25 m / 30°.
 2. ~~Email sending~~ → **build the flow, log the email in development**. Swap in a
    provider when you have one.
-3. ~~Launch scope~~ → **friends and family on a trusted network**. P1.7 and P1.8
-   deferred with explicit triggers above.
+3. ~~Launch scope~~ → **friends and family on a trusted network**. P1.8 deferred
+   with an explicit trigger above; P1.7 is now done.
 
 New ones, none of which block anything today:
 
@@ -342,5 +354,3 @@ New ones, none of which block anything today:
    codes, so this is no longer a security fix — it is what would let the gate come
    off and the app open to strangers. It adds a second email flow and a "not yet
    verified" state to the UI.
-3. **Block/mute before or after walk history?** Block is smaller and more useful;
-   history is more visible and more fun.
