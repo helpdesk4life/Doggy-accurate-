@@ -72,7 +72,7 @@ python -m venv .venv
 | `ADMIN_TOKEN_TTL_SECONDS` | `28800` | Admin session lifetime (8 hours, no refresh) |
 | `PASSWORD_CHANGE_TOKEN_TTL_SECONDS` | `900` | Lifetime of the ticket that forces a password change |
 | `PUBLIC_BASE_URL` | `http://localhost:8000` | Base URL used to build the link in a password-reset email |
-| `RATE_LIMIT_ENABLED` | `1` | Per-IP throttling on the auth endpoints |
+| `RATE_LIMIT_ENABLED` | `1` | Per-IP throttling on the auth endpoints and `/blocks/{id}` |
 | `INVITE_REQUIRED` | `1` | Registration needs a single-use code |
 | `EMAIL_SENDER` | `logging` | Which `EmailSender` to install: `logging` or `smtp` |
 | `ALLOW_LOGGING_EMAIL` | `0` | Acknowledges that reset codes go to the log, outside development |
@@ -143,7 +143,7 @@ cd backend
 .venv/Scripts/python -m pytest -q
 ```
 
-156 tests. They run against `fakeredis`, so no Redis server is needed.
+207 tests. They run against `fakeredis`, so no Redis server is needed.
 
 | File | Covers |
 | --- | --- |
@@ -151,6 +151,8 @@ cd backend
 | `test_proximity.py` | Alert round trip, leaving the radius, disconnect cleanup, frame validation, the 30 s expiry sweep, the GEO query, and that alerts carry no coordinates |
 | `test_privacy.py` | Bearing cardinal directions, quantisation snapping, the error bound, the zero-quantum escape hatch |
 | `test_security.py` | Password reset (send, single use, wrong code, attempt cap, no enumeration), account deletion, refresh replay grace vs. revocation, config validation, cache headers |
+| `test_email.py` | The SMTP sender: STARTTLS before login, implicit TLS, a relay with no credentials, the headers a provider needs, a failed send still closing the connection, and the boot guards that refuse an incomplete or unencrypted configuration |
+| `test_smtp_settings.py` | The panel's configuration store: round trip, a saved configuration beating `EMAIL_SENDER`, the password never coming back out, the test send not saving, the page never rendering the password, and the reset-code index drained on use and on account deletion |
 | `test_ratelimit.py` | Per-address throttling, per-address isolation, health exempt, limiter can be disabled, and the `/blocks/` prefix bucket shared across ids |
 | `test_invites.py` | The gate, single use, refund on a taken email, and that a taken and a free address are indistinguishable without a code |
 | `test_admin.py` | The token boundary in both directions, admin lockout, user listing and paging, account creation and the forced password change it triggers, revoke and delete, invite minting, the audit log, and that no admin response carries a position |
@@ -609,7 +611,8 @@ The relationship is stored on the device only, in `SharedPreferences` under
 `marked_dogs`, as a JSON list of `{id, name, relationship}`. **Nothing about it is ever
 sent to the server.** The backend has no idea who likes whom, so the social graph cannot
 leak from Redis even if the store were dumped. This is why the feature needed no backend
-change at all.
+change at all. Blocking is the one exception — it has to be server-side to work; see
+[Blocking a walker](#blocking-a-walker).
 
 Names are persisted alongside the ids so the settings list still reads correctly when the
 dog is not nearby. Settings has a **Marked dogs** section listing both groups, each row
@@ -640,6 +643,42 @@ a chime. This is an explicit `urgency()` function, not enum ordinal order.
 `WalkRepository` emits only the walkers that *just* arrived inside the warning distance,
 not the whole set. With per-relationship sounds, re-emitting the full set would replay the
 disliked alarm every time an unrelated friend appeared.
+
+## Blocking a walker
+
+Marking is local and cosmetic; blocking is not. A block has to stop the other
+walker receiving your bearing at all, and only the server can do that, so this is
+the one piece of the social graph that lives in Redis.
+
+| Endpoint | Purpose |
+| --- | --- |
+| `GET /blocks` | Who you have blocked, with the name captured at block time |
+| `POST /blocks/{id}` | Block a walker (204) |
+| `DELETE /blocks/{id}` | Unblock (204, harmless when there was none) |
+
+**Invisibility is symmetric.** `app/blocks.py` keeps two keys per walker — a hash
+of who you blocked (`dogwalk:blocks:<id>`) and a set of who blocked you
+(`dogwalk:blocked_by:<id>`) — and `refresh_neighborhood` drops the union before
+building the frame. A one-way filter would leave the blocker on the blocked
+walker's map, which is the exact thing they blocked them to prevent. Both maps
+are refreshed by the request itself, so the marker goes away on the tap rather
+than on the next GPS fix.
+
+**Blocking never reports whether the id exists.** A 404 for an unknown walker
+would make the route an account-existence oracle, and the client only ever blocks
+someone it just saw on the map. The list is capped at 200 entries instead, which
+bounds the storage without answering that question: the 201st distinct id gets
+409 `block list is full`, a statement about your own list rather than about the
+id. Re-blocking an existing entry writes no new key and is still allowed at the
+ceiling. `POST /blocks/{id}` is also throttled at 60/minute on the `/blocks/`
+prefix — see [Authentication](#authentication).
+
+The name is stored because the settings list has to name someone who is not
+walking right now, and the hub only knows the names of live connections. It is
+the same display name the server already broadcasts to everyone in range.
+
+Deleting an account calls `blocks.forget()`, so everyone who blocked it does not
+keep a stale id in their settings forever.
 
 ## Testing proximity by hand
 

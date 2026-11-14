@@ -1,14 +1,15 @@
 # Handoff — DogWalk
 
-State captured at the end of the blocking session (2026-11-14). Read this
+State captured at the end of the security-review session (2026-11-14). Read this
 first when picking the project back up. For what to build next, see
 `ROADMAP.md`; for the iOS plan in full, `IOS-PORT.md`; for the iOS code that
 exists, `ios/README.md`.
 
 **The tree is clean and deployed to the VPS**, where `deploy/verify.sh` passes
-12/12. The admin panel landed earlier as `e5ed2ad admin pagina en account
-creation`, on top of `7d26413 Eerste versie`; see **What landed in `e5ed2ad`** at
-the bottom for what that commit contains.
+16/16. The last code commit is `f273169` (the block ceiling); everything after it
+is documentation. The admin panel landed earlier as `e5ed2ad admin pagina en
+account creation`, on top of `7d26413 Eerste versie`; see **What landed in
+`e5ed2ad`** at the bottom for what that commit contains.
 
 ## What this project is
 
@@ -47,8 +48,8 @@ backend port nor Redis is reachable from the LAN. Caddy on `8443` is the only wa
 in from outside.
 
 The VPS (`207.180.240.29`) is the production target: same two containers plus a
-host Caddy, running the blocking release with a clean tree, and
-`deploy/verify.sh` passes 12/12 there. It pulls from `github`, not `origin`, and
+host Caddy, running `f273169` with a clean tree, and
+`deploy/verify.sh` passes 16/16 there. It pulls from `github`, not `origin`, and
 `git` must run as `thomas` — root has no deploy key. See `deploy/VPS.md`.
 
 ## Resuming
@@ -267,7 +268,7 @@ Marking a dog as liked or disliked is stored in `SharedPreferences` under
 `marked_dogs` and **never sent to the server**. The backend has no concept of a
 relationship, so the social graph cannot leak from Redis even if the store were
 dumped. The whole feature is Android-only; `pytest -q` stayed at 71 passed
-(then — 156 now).
+(then — 207 now).
 
 Where it lives:
 
@@ -833,7 +834,7 @@ throwaway account derived from `--email`.
   `PROXIMITY_CLEAR` → `GET /blocks` 200 carrying the name → `DELETE` 204 → both
   visible again. `GET /blocks` answers 401 unauthenticated, which is how the route
   was confirmed live after the deploy.
-- **`deploy/verify.sh` on the VPS**: 12/12 PASS, including the Let's Encrypt
+- **`deploy/verify.sh` on the VPS**: 16/16 PASS, including the Let's Encrypt
   issuer check and a 206 range request against `benelux.pmtiles`.
 
 ## Android tests
@@ -932,7 +933,7 @@ GitHub Actions, on `github.com/helpdesk4life/doggy` (private). The first run,
 The two `skipped` steps in that run — `Upload reports` and `Dump container logs`
 — are both `if: failure()`, so skipping is the correct outcome on a green run.
 
-The suite has grown since: 156 backend tests and 33 Android tests as of the
+The suite has grown since: 207 backend tests and 33 Android tests as of the
 2026-11-14 doc sync. That run is the last one confirmed green from here — the
 GitHub connector exposes no workflow-run status, so check the Actions tab after a
 push rather than assuming.
@@ -1141,7 +1142,7 @@ Modified: `backend/app/{auth,config,main,ratelimit,routes_auth,users}.py`,
 auth files plus `strings.xml`, and `README.md` / `ROADMAP.md` / `HANDOFF.md` /
 `IOS-PORT.md`.
 
-The counts in `README.md` and `ROADMAP.md` (156 tests, 56 e2e checks) describe
+The counts in `README.md` and `ROADMAP.md` (207 tests, 56 e2e checks) describe
 this state. Re-run the gates to confirm the baseline before starting new work —
 `pytest` needs nothing, `e2e.py` needs the Docker stack up (see **Resuming**):
 

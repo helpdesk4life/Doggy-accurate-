@@ -3,7 +3,7 @@
 What to build next, in priority order. `HANDOFF.md` covers how to get the stack
 running and what is already verified; this file is the forward-looking half.
 
-Last updated at the end of the admin-panel session.
+Last updated at the end of the security-review session (2026-11-14).
 
 ## Start here tomorrow
 
@@ -27,8 +27,10 @@ cd /c/Users/thoma/Downloads/dog/backend
 ./.venv/Scripts/python.exe scripts/e2e.py        # expect 56/56
 ```
 
-**The admin panel is committed** as `e5ed2ad`, and the tree is clean. See
-**What landed in `e5ed2ad`** in `HANDOFF.md` for what that commit contains.
+**The tree is clean**, the last code commit being `f273169` (the block ceiling),
+on top of the SMTP work (`e624390`, `15ddb85`) and the admin panel (`e5ed2ad`).
+See **What landed in `e5ed2ad`** in `HANDOFF.md` for the panel, and **Blocking**
+for the block store.
 
 The app is signed in as `fresh@example.com` / `hunter2hunter2` with dog `Pickle`.
 `emma@example.com` also uses `hunter2hunter2`. `buddy@example.com` was created by
@@ -50,7 +52,7 @@ trusted network, which is the launch scope we settled on.
 | --- | --- |
 | Exact coordinates broadcast to strangers | Distance + bearing only, quantised. No absolute position leaves the server |
 | Tokens in plain `SharedPreferences` | Keystore-backed AES-GCM, `allowBackup="false"` |
-| No password reset | 6-digit code flow, pluggable sender that logs in development |
+| No password reset | 6-digit code flow, pluggable sender: SMTP, or the log in development |
 | No account deletion | `DELETE /auth/account` + confirmation dialog |
 | `JWT_SECRET` falls back to a known dev value | Hard `RuntimeError` at startup outside development |
 | No rate limiting on auth | Per-IP fixed-window limiter, `X-Forwarded-For` overwritten by Caddy |
@@ -208,6 +210,41 @@ client to show a change screen — would have left the handed-over password
 working, which defeats the point of generating one. Test count went from 123 to
 129; the Android client grew a second step on the login screen to match.
 
+## Security review — done (2026-11-14)
+
+A pass over the deployment looking for gaps the P0/P1 tables do not cover. Two of
+them needed code; both are closed.
+
+**Reset codes could not leave the log.** `app/email.py` had a `LoggingEmailSender`
+and a protocol, but no real sender, so the only way a reset code reached a user
+was `docker compose logs backend`. `SmtpEmailSender` now speaks plain SMTP on a
+worker thread (`asyncio.to_thread`), so a slow provider cannot stall the event
+loop, and a failed send is logged rather than raised — a 500 for a known address
+and a 202 for an unknown one would be the enumeration oracle the endpoint exists
+to avoid. `Settings.validate()` refuses to boot on an incomplete configuration,
+an unknown security mode, or a password over an unencrypted connection.
+
+**The SMTP configuration is editable from the panel.** `/admin/ui/smtp` stores a
+configuration in `dogwalk:settings:smtp`, rebuilds the running sender in place,
+and sends a test message through the values on screen before you commit to them.
+A saved configuration wins over `EMAIL_SENDER`, which is what makes the page
+usable on a deployment that still says `EMAIL_SENDER=logging`. The password is
+write-only: never returned by the API, never in the template context, never in
+the audit log. The same pass closed a smaller bug — reset codes were indexed per
+email but never removed, so `consume_reset_code` and `delete_user` now drain
+`dogwalk:reset:index:<email>`.
+
+**`POST /blocks/{id}` was unbounded.** It accepted any 32-hex id and wrote two
+Redis keys per call, and an id that never belonged to an account is cleaned up by
+nothing except an unblock. The list is now capped at `blocks.MAX_BLOCKS` (200,
+answered 409) and the route is throttled at 60/minute on the `/blocks/` prefix.
+The cap is deliberately not an existence check — the P2 bullet below has the
+argument for why a 404 would have been the wrong fix.
+
+Test count went from 129 to 207 across the sessions since the panel, 43 of them
+in `test_email.py` and `test_smtp_settings.py`. `deploy/verify.sh` passes 16/16
+on the VPS.
+
 ## Deferred — deliberately, per the friends-and-family scope
 
 One P1 item is left undone. It is not forgotten; it is gated on a decision to go
@@ -247,7 +284,7 @@ deploy mid-evening annoys someone.
   `NotificationHelper` and the Compose UI still have no tests at all.
 - **CI is green but cannot gate anything.** `.github/workflows/ci.yml` runs all
   three jobs on every push and passed on `9bd0114` (134 backend tests, 56/56 e2e,
-  Android tests + lint). The suite has since grown to 156 backend tests and 33
+  Android tests + lint). The suite has since grown to 207 backend tests and 33
   Android tests as of the 2026-11-14 doc sync. But `main` has no branch
   protection: GitHub refuses it on a private repo without Pro (`403 Upgrade to
   GitHub Pro`), so a red run does not block a merge. Nothing deploys either — the
@@ -331,13 +368,15 @@ blocking hides you from them as well — and it survives a reinstall because it
 lives in Redis. Verified on the emulator, including after `pm clear`, and on the
 VPS over `wss://backend.thomasfeyens.be` with two real sockets: both visible →
 `POST /blocks` 204 → both `PROXIMITY_CLEAR` → `DELETE` 204 → both visible again.
-`deploy/verify.sh` passes 12/12 on the box.
+`deploy/verify.sh` passes 16/16 on the box.
 
-**The docs were resynced on 2026-11-14.** Seven claims had drifted from the code:
-production TLS was recorded as still on the local CA, blocking was recorded as
-not existing, the admin panel was recorded as having no second gate, and four
-test counts were stale. All corrected against a full gate run — 156 backend
-tests, 56/56 e2e, 33 Android tests, 0 lint errors, 12/12 on the VPS.
+**The docs were resynced twice on 2026-11-14.** The first pass fixed seven claims
+that had drifted from the code: production TLS was recorded as still on the local
+CA, blocking was recorded as not existing, the admin panel was recorded as having
+no second gate, and four test counts were stale. The second pass followed the
+security review and added the blocks API to `README.md`, which had never
+documented it, plus the two email test files. Current gate: 207 backend tests,
+56/56 e2e, 33 Android tests, 0 lint errors, 16/16 on the VPS.
 
 The next visible thing is **walk history and stats** (P3): distance, duration and
 dogs met are all derivable from what the app already receives, and it is the
