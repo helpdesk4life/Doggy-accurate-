@@ -5,11 +5,101 @@ first when picking the project back up. For what to build next, see
 `ROADMAP.md`; for the iOS plan in full, `IOS-PORT.md`; for the iOS code that
 exists, `ios/README.md`.
 
-**The tree is clean and deployed to the VPS**, where `deploy/verify.sh` passes
-every check. HEAD is `c2c3af6`; see **Session log — 2026-11-15** below for what
+**`main` is clean and deployed to the VPS**, where `deploy/verify.sh` passes
+every check. `main` is `d2f5018`; see **Session log — 2026-11-15** below for what
 landed in the last session. The admin panel landed earlier as `e5ed2ad admin
 pagina en account creation`, on top of `7d26413 Eerste versie`; see **What
 landed in `e5ed2ad`** at the bottom for what that commit contains.
+
+**One PR is open: #13 on `vibe/vuln-scanners-056e99`** — the
+dependency-vulnerability scanners. It is not merged and not finished. Read
+**Session log — 2026-11-15 (evening)** first.
+
+## Session log — 2026-11-15 (evening) — PR #13, vulnerability scanners
+
+Work in progress on branch `vibe/vuln-scanners-056e99`, PR #13. **Not merged,
+not pushed to `origin`.** `main` is untouched at `d2f5018`.
+
+### What the CI failure was
+
+The android job failed on run `43714875609` with:
+
+```
+Error updating the NVD Data
+Caused by: io.github.jeremylong.openvulnerability.client.nvd.NvdApiException:
+  Invalid API Key, length of 0 too short to provided a masked partial key
+Unable to continue dependency-check analysis.
+> Task :app:dependencyCheckAnalyze FAILED
+```
+
+Root cause: dependency-check **13.0.0** ships `nvd.api.key=` as an empty default
+in `dependencycheck.properties`, and `NvdApiDataSource` only null-checks it
+(`ifnull` in the bytecode), so `""` reaches `NvdCveClientBuilder.withApiKey("")`
+and `NvdCveClient` rejects any key shorter than 5 chars. 12.2.2 has no such
+default. The `nvd.apiKey` line in `app/build.gradle.kts` is correct — the plugin
+uses `setStringIfNotEmpty`, so a blank env var is skipped.
+
+### What landed on the branch
+
+| Commit | What |
+| --- | --- |
+| `057161a` | Scan step skips when `NVD_API_KEY` is absent (`if: env.NVD_API_KEY != ''`); env moved to job level because the `secrets` context is not allowed in a condition. `UPGRADING.md` corrected: the key is required, not optional. |
+| `2aa4479` | Cache path fixed: `~/.dependency-check` → `~/.gradle/dependency-check-data`. `DataExtension` defaults to `<gradleUserHome>/dependency-check-data/<version>`, so the old path was never created and the cache never hit. |
+
+Both actionlint-clean. `057161a` is pushed to `github`; `2aa4479` is local only.
+CI run `43743687642` is 3/3 green with the scan step skipped.
+
+### The NVD key
+
+Added to `/c/Users/thoma/Downloads/.secrets/dogwalk-secrets.env` as
+`NVD_API_KEY`. **Still needs to be added as a GitHub repo secret** — Settings →
+Secrets and variables → Actions → `NVD_API_KEY`. Until then the scan step stays
+skipped and the Android dependency gate is off.
+
+### Two open problems
+
+1. **NVD's API was down** during the last run: `NvdApiException: NVD Returned
+   Status Code: 503` after 31 retries. Verified independently — `curl` to
+   `services.nvd.nist.gov/rest/json/cves/2.0` returns 503 in 0.4s with and
+   without the key, and the body is a Cloudflare "No server is available to
+   handle this request" page. Retry before concluding anything.
+2. **The scan analyzes the wrong classpath.** It walked 20 jars —
+   `google-java-format`, `jimfs`, `jna`, `groovy`, `commons-compress`,
+   `httpclient`, `jaxb-runtime`, `txw2`, `protos`, `compose-group-mapping` — all
+   Gradle/AGP/Kotlin plugin internals, and zero app dependencies (no maplibre,
+   okhttp, kotlinx-coroutines, play-services). It also throws
+   `IllegalAccessError: class org.apache.commons.lang3.Strings tried to access
+   method CharSequenceUtils.regionMatches` from analyzing `commons-lang3-3.16.0.jar`
+   against dependency-check's own newer copy in a different classloader. So the
+   gate fails and measures the wrong thing even with NVD up.
+
+### Next step — needs a decision
+
+Either point the plugin at the app's classpath:
+
+```kotlin
+dependencyCheck {
+    scanConfigurations.set(listOf("debugRuntimeClasspath"))
+    ...
+}
+```
+
+(`debugRuntimeClasspath` exists and resolves the real dependencies — checked with
+`./gradlew :app:dependencies --configuration debugRuntimeClasspath`), or drop
+dependency-check for Android and use OSV-Scanner or Trivy against the Gradle
+dependency graph. dependency-check is a JVM-artifact scanner and Android ships
+AARs, so it is an awkward fit either way. Neither alternative needs an NVD key.
+
+### Environment facts added
+
+- dependency-check's data directory is `~/.gradle/dependency-check-data/11.0`
+  (343 MB after a full pull), **not** `~/.dependency-check`.
+- `NVD_API_KEY` lives in `/c/Users/thoma/Downloads/.secrets/dogwalk-secrets.env`.
+  Export it before a local scan:
+  `export NVD_API_KEY=$(grep '^NVD_API_KEY=' /c/Users/thoma/Downloads/.secrets/dogwalk-secrets.env | cut -d= -f2-)`
+- `actionlint` is not installed on this machine. The 1.7.12 Windows binary was
+  downloaded to `/tmp/al/actionlint.exe` for this session; re-download it or
+  install it properly before trusting a workflow edit.
 
 ## Session log — 2026-11-15
 
@@ -1030,9 +1120,11 @@ The two `skipped` steps in that run — `Upload reports` and `Dump container log
 — are both `if: failure()`, so skipping is the correct outcome on a green run.
 
 The suite has grown since: 207 backend tests and 33 Android tests as of the
-2026-11-14 doc sync. That run is the last one confirmed green from here — the
-GitHub connector exposes no workflow-run status, so check the Actions tab after a
-push rather than assuming.
+2026-11-14 doc sync. The GitHub connector does expose check runs after all —
+`pull_request_read` with `method: get_check_runs` returns per-job status and
+conclusion for a PR's head commit, which is how the #13 failure was found. It
+does **not** expose job logs, so a red job still means reproducing locally or
+reading the Actions tab.
 
 `origin` is still the self-hosted Gitea at `192.168.3.70:2222`, a private address
 the VPS cannot reach. `github` is the remote that matters: it is what CI watches
