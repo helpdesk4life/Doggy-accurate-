@@ -20,7 +20,8 @@ Review and merge those like any other PR: the gates below still apply.
 | Android SDK levels | `android/app/build.gradle.kts` (`compileSdk`/`targetSdk` 36, `minSdk` 26), `ci.yml` `packages:` | 36 / 26 | developer.android.com |
 | Gradle wrapper | `android/gradle/wrapper/gradle-wrapper.properties` | 9.9.1 | services.gradle.org |
 | Docker images | `backend/docker-compose.yml`, `backend/Dockerfile` | redis:7-alpine, caddy:2-alpine, python:3.12-slim | Docker Hub |
-| GitHub Actions | `.github/workflows/ci.yml` `uses:` | checkout@v7, setup-python@v7, setup-java@v6, setup-android@v4, setup-gradle@v6, upload-artifact@v7 | GitHub Marketplace; Dependabot already bumps these |
+| GitHub Actions | `.github/workflows/ci.yml` `uses:` | checkout@v7, setup-python@v7, setup-java@v6, setup-android@v4, setup-gradle@v6, cache@v6, upload-artifact@v7 | GitHub Marketplace; Dependabot already bumps these |
+| Vulnerability scanners | `ci.yml` audit steps, `app/build.gradle.kts` `dependencyCheck` | pip-audit (installed fresh in CI), OWASP dependency-check 13.0.0, `failBuildOnCVSS` 7.0 | PyPI / Gradle plugin portal |
 
 ## Runbooks
 
@@ -103,18 +104,46 @@ Already automated: Dependabot bumps the `uses:` majors weekly
 (`package-ecosystem: github-actions`). Just review the PR and let CI run —
 the three jobs (backend pytest, Android tests+lint, e2e) are the check.
 
+### Vulnerability scanning
+
+Both scanners are gates in `ci.yml`, so every PR and every run on `main` is
+audited — including Dependabot's weekly bumps.
+
+- Backend: a `pip-audit` step in the `backend` job audits the environment
+  pytest just installed — transitive dependencies included. pip is upgraded
+  first so the runner's own pip cannot produce findings that are not project
+  dependencies; `--strict` fails if dependency collection breaks. Reproduce
+  locally with `pip install -U pip pip-audit && pip-audit --strict` inside
+  the backend venv.
+- Android: the `org.owasp.dependencycheck` Gradle plugin (version catalog
+  entry `owaspDependencyCheck`, applied in `app/build.gradle.kts`) runs as
+  `:app:dependencyCheckAnalyze` in the `android` job. The report lands in
+  `app/build/reports/dependency-check/` and is uploaded with the other
+  Android reports when the job fails.
+- `failBuildOnCVSS` is 7.0: findings at CVSS >= 7 fail CI, softer ones are
+  report-only. A true finding is fixed by bumping the dependency in the same
+  PR (this file's runbooks); a false positive (CPE mis-matches happen on
+  Android) goes into a suppressions file wired up via `suppressionFile` in
+  the `dependencyCheck` block — never silence a whole dependency.
+- The NVD database is cached between runs via `actions/cache` on
+  `~/.dependency-check`. An `NVD_API_KEY` repo secret is optional but makes
+  the cold-start download much faster; without one the NVD rate limit makes
+  the first run crawl (hence the android job's 30-minute timeout).
+
 ## Universal checklist (every dependency PR)
 
 1. One group per PR; say what moved and why in the PR body.
 2. Local gates green: `pytest -q`, ruff `F,E9`, `scripts/e2e.py`,
    `./gradlew :app:testDebugUnitTest :app:lintDebug` as applicable.
+   The vulnerability scanners (`pip-audit`, `:app:dependencyCheckAnalyze`)
+   run in CI as part of the same gate — see "Vulnerability scanning" above.
 3. CI green on the PR: backend, android, e2e jobs.
 4. Deploy to the VPS, then `sudo bash deploy/verify.sh` → 16/16 PASS.
 5. Update this file's "current" column and `HANDOFF.md`'s environment facts.
 
 ## Known gap
 
-There is no dependency-vulnerability scanner in CI yet (TEST-REPORT
-recommendation 4). When one is added (`pip-audit` for the backend, OWASP
-dependency-check for Android), wire it into the same checklist as step 2 and
-let Dependabot's `security-updates` ride along with the weekly PRs.
+Closed 2026-11-15 (TEST-REPORT recommendation 4): both scanners described
+under "Vulnerability scanning" above are wired into CI as gates. Dependabot's
+`security-updates` ride along with the weekly PRs and are audited by the same
+gates before merge.

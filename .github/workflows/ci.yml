@@ -41,10 +41,22 @@ jobs:
         working-directory: backend
         run: python -m pytest -q
 
+      # Gate: audits the full environment pytest just ran against — transitive
+      # dependencies included. pip is upgraded first so the runner's own pip
+      # cannot produce findings that are not project dependencies; --strict
+      # fails the audit if dependency collection breaks instead of silently
+      # skipping packages.
+      - name: Audit dependencies (pip-audit)
+        working-directory: backend
+        run: |
+          python -m pip install -U pip pip-audit
+          pip-audit --strict
+
   android:
     name: Android tests and lint
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # 30 because dependency-check's first NVD download (cold cache) is slow.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -62,12 +74,33 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
 
+      # dependency-check stores its NVD database under ~/.dependency-check.
+      # The runners are ephemeral, so without this the first run of every job
+      # re-downloads the whole database. Keyed per run so every run saves a
+      # fresh copy and the next one restores the newest.
+      - name: Restore dependency-check database
+        uses: actions/cache@v6
+        with:
+          path: ~/.dependency-check
+          key: dependency-check-nvd-${{ github.run_id }}
+          restore-keys: dependency-check-nvd-
+
       # One Gradle invocation so the Kotlin compile is shared between the two
       # tasks. --continue keeps lint running when a test fails, so a red run
       # still reports both rather than hiding the second problem behind the first.
       - name: Run unit tests and lint
         working-directory: android
         run: ./gradlew :app:testDebugUnitTest :app:lintDebug --continue --console=plain
+
+      # Gate: fails the job on any finding with CVSS >= 7 (see the
+      # dependencyCheck block in app/build.gradle.kts). An NVD_API_KEY secret
+      # is optional but strongly recommended — without one the NVD API rate
+      # limit makes the first download crawl.
+      - name: Scan dependencies (OWASP dependency-check)
+        working-directory: android
+        env:
+          NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
+        run: ./gradlew :app:dependencyCheckAnalyze --console=plain
 
       - name: Upload reports
         if: failure()
@@ -77,6 +110,7 @@ jobs:
           path: |
             android/app/build/reports/tests/
             android/app/build/reports/lint-results-debug.html
+            android/app/build/reports/dependency-check/
           if-no-files-found: ignore
 
   e2e:

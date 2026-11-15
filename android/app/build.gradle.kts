@@ -6,6 +6,16 @@ plugins {
     alias(libs.plugins.kotlin.serialization)
     alias(libs.plugins.ksp)
     alias(libs.plugins.hilt)
+    alias(libs.plugins.owasp.dependency.check)
+}
+
+// Vulnerability gate wired into CI (UPGRADING.md, "Vulnerability scanning").
+// Fails dependencyCheckAnalyze on any finding with CVSS >= 7; findings below
+// that threshold are report-only. The NVD_API_KEY env var is optional — an
+// empty/unset key still works, just slower against the NVD rate limit.
+dependencyCheck {
+    failBuildOnCVSS.set(7.0f)
+    System.getenv("NVD_API_KEY")?.takeIf { it.isNotBlank() }?.let { nvd.apiKey.set(it) }
 }
 
 // Release signing is read from android/keystore.properties, which is gitignored.
