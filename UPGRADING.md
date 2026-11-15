@@ -126,9 +126,22 @@ audited — including Dependabot's weekly bumps.
   Android) goes into a suppressions file wired up via `suppressionFile` in
   the `dependencyCheck` block — never silence a whole dependency.
 - The NVD database is cached between runs via `actions/cache` on
-  `~/.dependency-check`. An `NVD_API_KEY` repo secret is optional but makes
-  the cold-start download much faster; without one the NVD rate limit makes
-  the first run crawl (hence the android job's 30-minute timeout).
+  `~/.dependency-check`.
+- **An `NVD_API_KEY` repo secret is required, not optional.** Request one at
+  <https://nvd.nist.gov/developers/request-an-api-key> (Developers → Request
+  an API Key; the form asks for an organisation name, an email and an
+  organisation type, and the key arrives by mail). NIST answers `403` to
+  non-browser clients, so a `curl` against that URL looks like a dead link —
+  open it in a browser. Without the secret the scan step is skipped rather
+  than failed, so CI stays green but the Android dependency gate is off. With
+  it, the limit is 50 requests per 30s instead of 5.
+- dependency-check 13.0.0 cannot run keyless: it ships `nvd.api.key=` as an
+  empty default in `dependencycheck.properties`, and `NvdApiDataSource` only
+  null-checks it, so the empty string reaches the NVD client and aborts the
+  update with `Invalid API Key, length of 0 too short to provided a masked
+  partial key`. 12.2.2 has no such default and does start the update, but at
+  5 requests per 30s the 425,838-record cold download does not fit the job
+  timeout. Do not "fix" this by downgrading — add the key.
 
 ## Universal checklist (every dependency PR)
 
