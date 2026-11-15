@@ -6,10 +6,66 @@ first when picking the project back up. For what to build next, see
 exists, `ios/README.md`.
 
 **The tree is clean and deployed to the VPS**, where `deploy/verify.sh` passes
-16/16. The last code commit is `f273169` (the block ceiling); everything after it
-is documentation. The admin panel landed earlier as `e5ed2ad admin pagina en
-account creation`, on top of `7d26413 Eerste versie`; see **What landed in
-`e5ed2ad`** at the bottom for what that commit contains.
+every check. HEAD is `c2c3af6`; see **Session log — 2026-11-15** below for what
+landed in the last session. The admin panel landed earlier as `e5ed2ad admin
+pagina en account creation`, on top of `7d26413 Eerste versie`; see **What
+landed in `e5ed2ad`** at the bottom for what that commit contains.
+
+## Session log — 2026-11-15
+
+All of the below is committed, pushed to both remotes (`github` and `origin`),
+and deployed to the VPS. HEAD is `c2c3af6`, tree clean, no open PRs.
+
+### What landed
+
+| Commit | What |
+| --- | --- |
+| `859b69e` | `SECURITY.md` replaced with a real security policy. |
+| `f80362c` | `UPGRADING.md` dependency runbook (one group per PR); Dependabot extended to pip and gradle. |
+| `c9313d1` | Android walk history & stats: client-side `WalkStatsRecorder` + `PrefsWalkHistoryStore` (capped at 100 walks) plus a history dialog. 48 unit tests, lint 0 errors, verified on the emulator. |
+| `5ac6697` | `INSTALL.md` — backend + Android setup, every step audited against the repo. |
+| `6f1e4f7` | CrowdSec install and its packaging gotchas documented in `deploy/VPS.md`. |
+| `9702cf5`–`c2ef920` | Dependabot pip PRs #2–#6 merged: httpx >=0.28.1, uvicorn >=0.54.0, pydantic >=2.14.3, pytest >=9.2.0, jinja2 >=3.1.6. Local gates green with `-U`: pytest 207, ruff clean, e2e 56/56. |
+| `c2c3af6` | PR #12 merged — the whole Android toolchain moved as one group: AGP 9.5.0, Gradle wrapper 9.9.1, Kotlin 2.4.21, KSP 2.3.14, Hilt 2.60.1, coroutines 1.11.0, play-services-location 21.4.0. `org.jetbrains.kotlin.android` removed (AGP 9 has built-in Kotlin and hard-fails otherwise); compileSdk stays 36. CI 3/3 green; Dependabot PRs #7–#11 closed as superseded. Local: 48 tests, lint 0 errors / 39 warnings. |
+
+### VPS state (207.180.240.29)
+
+- **CrowdSec v1.8.2 + `crowdsec-firewall-bouncer` (nftables mode)** installed,
+  running, console-enrolled. Acquisitions: caddy via journalctl + auth.log.
+  Collections: caddy, base-http-scenarios, http-cve, sshd, linux,
+  whitelist-good-actors. Admin IP allowlisted in
+  `/etc/crowdsec/parsers/s02-enrich/99-local-allowlist.yaml`. A live ban test
+  passed: an http-probing self-ban landed in the nft set and was reversed;
+  ssh-bf bans are active. Packaging gotchas (all in `deploy/VPS.md`): remove
+  `/var/lib/crowdsec/pending-registration`, delete the stale
+  `crowdsec-firewall-bouncer.yaml.local` (it overrides the api_key), systemd
+  drop-in with `Type=simple`, `mode: nftables` (iptables mode needs ipset).
+- Repo pulled to `c2c3af6` (git as `thomas`), backend rebuilt with
+  `docker compose up -d --build backend`, container healthy. Floors in the
+  container: pydantic 2.14.3, uvicorn 0.54.0, jinja2 3.1.6 (httpx/pytest are
+  dev-only, not in the runtime image).
+- `deploy/verify.sh`: all checks PASS ("OK: every check passed").
+- The restart dropped live walkers — expected; the geo index rebuilds from the
+  next fix.
+
+### Conventions still active
+
+- Push every commit to **both** `github` and `origin`.
+- **No sshd hardening yet** — still developing, root password SSH stays enabled
+  on the VPS.
+- Secrets live in `/c/Users/thoma/Downloads/.secrets` (`vps.sh` for SSH,
+  `dogwalk-secrets.env` for app secrets) — never print values into transcripts.
+- On the VPS, git must run as `thomas`:
+  `su - thomas -c "cd ~/dog && git ..."`.
+
+### Next up (details in ROADMAP.md)
+
+1. **Report a walker** — reuses the block plumbing: a report is a block plus a
+   row an operator can read.
+2. **Email verification** — the general fix for invite-gate probing
+   (`POST /auth/register` still answers 409 for a taken email after a spent
+   code). `SmtpEmailSender` already exists behind `EMAIL_SENDER=smtp`, and the
+   admin panel can configure SMTP and send a test mail.
 
 ## What this project is
 

@@ -3,7 +3,7 @@
 What to build next, in priority order. `HANDOFF.md` covers how to get the stack
 running and what is already verified; this file is the forward-looking half.
 
-Last updated at the end of the security-review session (2026-11-14).
+Last updated 2026-11-15 (see **Session log — 2026-11-15** in `HANDOFF.md`).
 
 ## Start here tomorrow
 
@@ -27,10 +27,11 @@ cd /c/Users/thoma/Downloads/dog/backend
 ./.venv/Scripts/python.exe scripts/e2e.py        # expect 56/56
 ```
 
-**The tree is clean**, the last code commit being `f273169` (the block ceiling),
-on top of the SMTP work (`e624390`, `15ddb85`) and the admin panel (`e5ed2ad`).
-See **What landed in `e5ed2ad`** in `HANDOFF.md` for the panel, and **Blocking**
-for the block store.
+**The tree is clean**, HEAD being `c2c3af6` (the Android toolchain group, PR #12),
+on top of the pip floor bumps (#2–#6), walk history (`c9313d1`), and the earlier
+SMTP work (`e624390`, `15ddb85`) and admin panel (`e5ed2ad`). See **Session log —
+2026-11-15** in `HANDOFF.md` for the full list, **What landed in `e5ed2ad`** for
+the panel, and **Blocking** for the block store.
 
 The app is signed in as `fresh@example.com` / `hunter2hunter2` with dog `Pickle`.
 `emma@example.com` also uses `hunter2hunter2`. `buddy@example.com` was created by
