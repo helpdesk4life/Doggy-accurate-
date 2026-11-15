@@ -78,14 +78,16 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
 
-      # dependency-check stores its NVD database under ~/.dependency-check.
-      # The runners are ephemeral, so without this the first run of every job
-      # re-downloads the whole database. Keyed per run so every run saves a
-      # fresh copy and the next one restores the newest.
+      # dependency-check stores its NVD database under the Gradle user home,
+      # not ~/.dependency-check: DataExtension defaults to
+      # <gradleUserHome>/dependency-check-data/<engine version>. The runners
+      # are ephemeral, so without this the first run of every job re-downloads
+      # the whole database. Keyed per run so every run saves a fresh copy and
+      # the next one restores the newest.
       - name: Restore dependency-check database
         uses: actions/cache@v6
         with:
-          path: ~/.dependency-check
+          path: ~/.gradle/dependency-check-data
           key: dependency-check-nvd-${{ github.run_id }}
           restore-keys: dependency-check-nvd-
 
