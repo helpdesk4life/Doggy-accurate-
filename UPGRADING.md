@@ -13,12 +13,12 @@ Review and merge those like any other PR: the gates below still apply.
 
 | Group | Pinned in | Current | Check latest |
 | --- | --- | --- | --- |
-| Backend runtime deps | `backend/requirements.txt` | floors: fastapi>=0.115, uvicorn[standard]>=0.32, redis>=5.2, pydantic>=2.9, pyjwt>=2.9, jinja2>=3.1, python-multipart>=0.0.9 | PyPI per package |
-| Backend dev/test deps | `backend/requirements-dev.txt` | adds pytest>=8.3, httpx>=0.27, fakeredis>=2.26 | PyPI per package |
+| Backend runtime deps | `backend/requirements.txt` | floors: fastapi>=0.115, uvicorn[standard]>=0.54.0, redis>=5.2, pydantic>=2.14.3, pyjwt>=2.9, jinja2>=3.1.6, python-multipart>=0.0.9 | PyPI per package |
+| Backend dev/test deps | `backend/requirements-dev.txt` | adds pytest>=9.2.0, httpx>=0.28.1, fakeredis>=2.26 | PyPI per package |
 | Python interpreter | `backend/Dockerfile` `FROM`, `ci.yml` `python-version` | 3.12 (`python:3.12-slim`) | Docker Hub / python.org |
-| Android libraries | `android/gradle/libs.versions.toml` | AGP 8.13.0, Kotlin 2.2.20, KSP 2.2.20-2.0.4, Hilt 2.57, Compose BOM 2025.09.00, MapLibre 12.0.0, OkHttp 4.12.0, … | Maven Central / developer.android.com |
+| Android libraries | `android/gradle/libs.versions.toml` | AGP 9.5.0, Kotlin 2.4.21, KSP 2.3.14, Hilt 2.60.1, play-services-location 21.4.0, coroutines 1.11.0, Compose BOM 2025.09.00, MapLibre 12.0.0, OkHttp 4.12.0, … | Maven Central / developer.android.com |
 | Android SDK levels | `android/app/build.gradle.kts` (`compileSdk`/`targetSdk` 36, `minSdk` 26), `ci.yml` `packages:` | 36 / 26 | developer.android.com |
-| Gradle wrapper | `android/gradle/wrapper/gradle-wrapper.properties` | 9.5.1 | services.gradle.org |
+| Gradle wrapper | `android/gradle/wrapper/gradle-wrapper.properties` | 9.9.1 | services.gradle.org |
 | Docker images | `backend/docker-compose.yml`, `backend/Dockerfile` | redis:7-alpine, caddy:2-alpine, python:3.12-slim | Docker Hub |
 | GitHub Actions | `.github/workflows/ci.yml` `uses:` | checkout@v7, setup-python@v7, setup-java@v6, setup-android@v4, setup-gradle@v6, upload-artifact@v7 | GitHub Marketplace; Dependabot already bumps these |
 
@@ -56,7 +56,13 @@ Bump versions in the catalog only — the build files reference
 Compatibility to check before building (in this order):
 
 - AGP requires a minimum Gradle — `gradle-wrapper.properties` must satisfy it.
-- KSP is version-locked to Kotlin (`2.2.20-2.0.4` style); move them together.
+  Gradle's own compatibility matrix caps what it has been tested with
+  (AGP 9.0–9.5.0-alpha at Gradle 9.9), so check both directions.
+- AGP 9 has built-in Kotlin support: `org.jetbrains.kotlin.android` no longer
+  applies and fails the build — remove it from the root and app `plugins {}`
+  blocks and from the catalog. The Compose and serialization plugins stay.
+- KSP is no longer version-locked to Kotlin since 2.3 (`2.3.14` style); use the
+  latest 2.x from Maven Central and let the build prove the pair.
 - Compose BOM, Hilt and `hiltCompose` move on their own calendars; the BOM
   overrides the individual Compose artifacts.
 - MapLibre needs Android 11.7+ for PMTiles — we are on 12.0.0, do not go below.

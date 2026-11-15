@@ -1109,8 +1109,12 @@ next person meets it as a passing test rather than a mystery failure.
 - **No Swift toolchain on this machine.** `swift` and `swiftc` are absent, and
   iOS targets cannot be built on Windows at all. The `ios/` directory can only be
   compiled on a Mac with Xcode 15 or later.
-- Gradle 9.5.1, AGP 8.13.0, Kotlin 2.2.20, KSP 2.2.20-2.0.4, Hilt 2.57,
-  Compose BOM 2025.09.00, MapLibre 12.0.0, OkHttp 4.12
+- Gradle 9.9.1, AGP 9.5.0, Kotlin 2.4.21, KSP 2.3.14, Hilt 2.60.1,
+  play-services-location 21.4.0, coroutines 1.11.0,
+  Compose BOM 2025.09.00, MapLibre 12.0.0, OkHttp 4.12.0.
+  AGP 9 has built-in Kotlin support: `org.jetbrains.kotlin.android` is removed
+  from the build files (it fails to apply under AGP 9); the Compose and
+  serialization plugins stay.
 - Backend venv: `backend/.venv/Scripts/python.exe`
 - `ruff` is installed in that venv for linting only, and is deliberately **not**
   in `requirements.txt`. Run it as
