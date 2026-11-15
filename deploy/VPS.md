@@ -453,6 +453,62 @@ Caddy renews certificates on its own. `apt` upgrades itself via
 `unattended-upgrades`. Nothing else is scheduled — **there is no backup cron**,
 so the command above is manual until you add one.
 
+## 13. CrowdSec (installed 2026-11-15)
+
+CrowdSec watches the two public surfaces — Caddy's access log (via journald) and
+`/var/log/auth.log` — and bans through the firewall bouncer in an nftables table.
+The backend container stays loopback-only, so Caddy is the right layer.
+
+```bash
+curl -s https://install.crowdsec.net | sh
+apt install -y crowdsec crowdsec-firewall-bouncer
+# acquisitions for caddy (journalctl) and sshd (auth.log) ship as
+# /etc/crowdsec/acquis.d/setup.{caddy,sshd,linux}.yaml — nothing to write.
+# collections enabled by default: caddy, base-http-scenarios, http-cve, sshd,
+# linux, whitelist-good-actors.
+```
+
+Three packaging gotchas, all hit on this box:
+
+1. `crowdsec-firewall-bouncer.service` has `ConditionPathExists=!/var/lib/crowdsec/pending-registration`;
+   the file ships with the package and must be removed once the bouncer is
+   registered: `rm -f /var/lib/crowdsec/pending-registration`.
+2. The bouncer merges `/etc/crowdsec/bouncers/<name>.yaml.local` over the main
+   yaml — the package drops a stale auto-generated `api_key` there, which silently
+   wins. Delete the `.local` file after putting the real key in the main one:
+   `cscli bouncers add crowdsec-firewall-bouncer` (capture the printed key!), then
+   `sed -i "s|^api_key: .*|api_key: <key>|" /etc/crowdsec/bouncers/crowdsec-firewall-bouncer.yaml`.
+3. The unit is `Type=notify` but the bouncer never sends READY and `daemonize: true`
+   makes it exit 0 — either way systemd kills it. Fix both with a drop-in and the
+   config: `printf "[Service]\nType=simple\n" > /etc/systemd/system/crowdsec-firewall-bouncer.service.d/override.conf`,
+   `daemon-reload`, and `sed -i "s|^daemonize: .*|daemonize: false|; s|^mode: .*|mode: nftables|"` on the
+   bouncer yaml (`mode: iptables` needs the `ipset` binary; `nftables` does not).
+
+Allowlist the admin workstation so a false positive cannot lock you out —
+`/etc/crowdsec/parsers/s02-enrich/99-local-allowlist.yaml`:
+
+```yaml
+name: local/admin-allowlist
+whitelist:
+  reason: "admin workstation"
+  ip:
+    - "178.51.71.124"
+```
+
+(Loopback and RFC1918 are already allowlisted by `crowdsecurity/whitelists`.)
+Enroll with the console for the community blocklist: `cscli console enroll <key>`.
+
+```bash
+systemctl enable --now crowdsec crowdsec-firewall-bouncer
+cscli decisions list          # live bans
+nft list set ip crowdsec crowdsec-blacklists   # what the bouncer enforces
+```
+
+Verified live: 40 requests to nonexistent paths from the box itself produced an
+`http-probing` ban on its own IP, `nft` showed it in the set, and the same request
+then failed until the decision was deleted; SSH brute-force from two real IPs was
+banned from auth.log; `deploy/verify.sh` still passes every check.
+
 ## What this does not do
 
 - **No SMTP credentials yet.** Reset codes go to the backend log, which is why
