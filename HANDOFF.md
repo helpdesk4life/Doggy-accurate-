@@ -312,6 +312,44 @@ Four things that will bite if changed carelessly:
    alert buzz twice. It was removed. The channel pattern also respects the user's
    per-channel settings and Do Not Disturb, which a direct call does not.
 
+## Walk history — client-side aggregates, never a route
+
+Stopping a walk (or losing the session mid-walk) records a `WalkSummary`: when it
+started and ended, how far it went, and which dogs came within the warning
+distance. Everything is derived from what the app already receives — its own GPS
+fixes and the `PROXIMITY_ALERT` arrivals — so the backend is untouched and the
+protocol unchanged.
+
+| Concern | File |
+| --- | --- |
+| `WalkSummary`, `MetDog` | `model/Models.kt` |
+| `WalkStatsRecorder` (per-walk accumulation) | `data/history/WalkStatsRecorder.kt` |
+| `WalkHistoryStore` interface + list rules | `data/history/WalkHistoryStore.kt` |
+| `PrefsWalkHistoryStore` (SharedPreferences JSON, capped at 100) | `data/history/PrefsWalkHistoryStore.kt` |
+| Feeding the recorder, persisting on stop/sign-out | `data/repository/WalkRepository.kt` |
+| History dialog, formatting | `ui/map/MapScreen.kt`, `MapViewModel.kt` |
+
+Three things worth not undoing:
+
+1. **Aggregates only.** No route and no coordinates are stored — the history file
+   is not a position log, matching the rule that keeps coordinates off the wire.
+   Like the marked-dogs list it lives in SharedPreferences and does not survive a
+   reinstall (`allowBackup="false"`); if it ever needs to sync, that is a server
+   store plus a privacy decision, same as friend groups.
+2. **The distance guards.** A step shorter than the better fix's accuracy radius is
+   GPS jitter and is not counted (the reference point stays put, so slow real
+   movement still accumulates across the deadband); a step over
+   `MAX_STEP_METERS` (250 m per 5 s fix) is a glitch and is dropped without moving
+   the reference, so the jump back is not counted either.
+3. **Dogs met = distinct walkers that arrived inside the warning distance**, fed
+   from the same `Arrived` events the notifications use, so the count matches what
+   actually buzzed.
+
+Verified on `emulator-5554` against the local stack: started a walk with
+`hold_walker.py --meters 60 --name Buddy`, moved the emulator 100 m mid-walk, stopped;
+the dialog showed `51 s · 96 m · 1 dog met · Buddy`, and the remove button emptied
+the list (`dogwalk_history.xml` → `[]`).
+
 ## Blocking — the one social signal that is server-side
 
 Friend and disliked are local because they only change how a marker looks and
@@ -688,8 +726,8 @@ the operator loses the password before handing it over, delete the account and
 make another — only a hash is stored.
 
 `pytest -q` → **207 passed**. `scripts/e2e.py` → **56/56 passed**.
-`./gradlew :app:testDebugUnitTest` → **33 passed**. `./gradlew :app:lintDebug` →
-**0 errors**, 45 warnings.
+`./gradlew :app:testDebugUnitTest` → **48 passed**. `./gradlew :app:lintDebug` →
+**0 errors**, 46 warnings.
 
 | Test file | Covers |
 | --- | --- |
@@ -839,7 +877,7 @@ throwaway account derived from `--email`.
 
 ## Android tests
 
-33 JVM tests in `android/app/src/test/`, run with
+48 JVM tests in `android/app/src/test/`, run with
 `./gradlew :app:testDebugUnitTest`. No emulator, no backend, no Robolectric.
 
 | File | Covers |
@@ -848,7 +886,9 @@ throwaway account derived from `--email`.
 | `data/repository/WalkRepositoryTest.kt` | Proximity bookkeeping (arrival once, not per fix; withdrawal on the last leaving and on a clear frame) and the three session-renewal branches |
 | `data/remote/WalkSocketClientTest.kt` | Connect, bearer header, name query parameter, frame decoding, 4401, reconnect, disconnect, the backoff ladder |
 | `data/remote/HttpBaseTest.kt` | `httpBaseOf()`: `ws` → `http`, `wss` → `https`, the query string dropped, and a URL without the socket path used as-is |
-| `testing/InMemorySecureStore.kt` | Shared fake, not a test |
+| `data/history/WalkStatsRecorderTest.kt` | Distance accumulation, the jitter deadband, the glitch cap, dogs-met union, `finish` stamping |
+| `data/history/WalkHistoryStoreTest.kt` | Newest-first insert, the 100-entry cap, remove-by-id, the in-memory fake |
+| `testing/InMemorySecureStore.kt`, `testing/InMemoryWalkHistoryStore.kt` | Shared fakes, not tests |
 
 Six things about the setup that will cost time if undone:
 
@@ -991,11 +1031,12 @@ next person meets it as a passing test rather than a mystery failure.
 
 ## Known gaps
 
-- **The Android tests cover the transport, the session, the repository and the
-  auth store, not the rest.** 33 tests: `WalkSocketClient` (connect, bearer
-  header, frame decoding, 4401, reconnect, the backoff ladder), `WalkRepository`
-  (proximity bookkeeping and the session-renewal branches), `AuthStore` (the
-  sign-in state machine) and `HttpBase` (the `ws` → `http` mapping). `SettingsStore`,
+- **The Android tests cover the transport, the session, the repository, the auth
+  store and the walk history, not the rest.** 48 tests: `WalkSocketClient` (connect,
+  bearer header, frame decoding, 4401, reconnect, the backoff ladder), `WalkRepository`
+  (proximity bookkeeping, the session-renewal branches and recording the finished
+  walk), `AuthStore` (the sign-in state machine), `HttpBase` (the `ws` → `http`
+  mapping), `WalkStatsRecorder` and `WalkHistoryStore`. `SettingsStore`,
   `NotificationHelper` and the Compose UI have none.
 - No reconnect backoff tuning — the client reconnects, but the retry cadence has
   not been stress-tested against a backend that stays down.

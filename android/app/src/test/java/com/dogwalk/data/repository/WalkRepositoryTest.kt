@@ -10,15 +10,18 @@ import com.dogwalk.data.auth.AuthState
 import com.dogwalk.data.auth.AuthStore
 import com.dogwalk.data.auth.TokenRefresher
 import com.dogwalk.data.auth.TokenResponse
+import com.dogwalk.data.history.WalkHistoryStore
 import com.dogwalk.data.remote.FrameTypes
 import com.dogwalk.data.remote.NearbyWalkerFrame
 import com.dogwalk.data.remote.ServerFrame
 import com.dogwalk.data.remote.WalkTransport
+import com.dogwalk.geo.GeoMath
 import com.dogwalk.model.ConnectionState
 import com.dogwalk.model.NearbyWalker
 import com.dogwalk.model.ProximityEvent
 import com.dogwalk.model.WalkerLocation
 import com.dogwalk.testing.InMemorySecureStore
+import com.dogwalk.testing.InMemoryWalkHistoryStore
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
@@ -79,7 +82,8 @@ class WalkRepositoryTest {
         authStore: AuthStore,
         refresher: FakeRefresher,
         settings: FakeSettings = FakeSettings(),
-    ): WalkRepository = WalkRepository(transport, settings, authStore, refresher, scope)
+        history: WalkHistoryStore = InMemoryWalkHistoryStore(),
+    ): WalkRepository = WalkRepository(transport, settings, authStore, refresher, history, scope)
 
     /**
      * Start the walk and let the collectors [WalkRepository.startTracking]
@@ -339,6 +343,77 @@ class WalkRepositoryTest {
             assertEquals(AuthState.SignedOut, store.state.value)
             assertFalse(repository.isTracking.value)
             assertEquals(1, transport.disconnects)
+        }
+    }
+
+    @Test
+    fun `stopTracking persists the walk with its distance and the dogs met`() = runTest {
+        session { scope ->
+            val transport = FakeTransport(scope)
+            val history = InMemoryWalkHistoryStore()
+            val repository = repository(
+                scope,
+                transport,
+                signedInStore(),
+                FakeRefresher(),
+                settings = FakeSettings(warningDistanceMeters = 100),
+                history = history,
+            )
+            startTracking(repository)
+
+            val second = GeoMath.destination(fix.latitude, fix.longitude, 0.0, 100.0)
+            repository.publishLocation(fix)
+            repository.publishLocation(
+                WalkerLocation(second.first, second.second, 5f, 6_000),
+            )
+            transport.receive(alertFrame(walker("buddy", 80.0)))
+            advanceUntilIdle()
+
+            repository.stopTracking()
+
+            val walks = history.walks.value
+            assertEquals(1, walks.size)
+            val summary = walks.single()
+            assertEquals(100.0, summary.distanceMeters, 1.0)
+            assertEquals(listOf("buddy"), summary.dogsMet.map { it.id })
+            assertEquals("Buddy", summary.dogsMet.single().name)
+        }
+    }
+
+    @Test
+    fun `a session that dies mid-walk still records the walk`() = runTest {
+        session { scope ->
+            val transport = FakeTransport(scope)
+            val refresher = FakeRefresher { throw AuthException("refresh token expired") }
+            val history = InMemoryWalkHistoryStore()
+            val repository = repository(scope, transport, signedInStore(), refresher, history = history)
+
+            startTracking(repository)
+            transport.receive(alertFrame(walker("buddy", 80.0)))
+            repository.publishLocation(fix)
+            advanceUntilIdle()
+
+            transport.expireAuth()
+            advanceUntilIdle()
+
+            assertEquals(1, history.walks.value.size)
+            assertEquals(listOf("buddy"), history.walks.value.single().dogsMet.map { it.id })
+        }
+    }
+
+    @Test
+    fun `starting a second walk without stopping does not record twice`() = runTest {
+        session { scope ->
+            val transport = FakeTransport(scope)
+            val history = InMemoryWalkHistoryStore()
+            val repository = repository(scope, transport, signedInStore(), FakeRefresher(), history = history)
+
+            startTracking(repository)
+            repository.startTracking()
+            repository.publishLocation(fix)
+            repository.stopTracking()
+
+            assertEquals(1, history.walks.value.size)
         }
     }
 

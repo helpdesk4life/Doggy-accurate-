@@ -8,6 +8,8 @@ import com.dogwalk.data.auth.AuthStore
 import com.dogwalk.data.auth.SecurePrefs
 import com.dogwalk.data.auth.SecureStore
 import com.dogwalk.data.auth.TokenRefresher
+import com.dogwalk.data.history.PrefsWalkHistoryStore
+import com.dogwalk.data.history.WalkHistoryStore
 import com.dogwalk.data.remote.WalkSocketClient
 import com.dogwalk.data.remote.WalkTransport
 import dagger.Module
@@ -68,4 +70,12 @@ object AppModule {
     @Provides
     @Singleton
     fun provideTokenRefresher(api: AuthApi): TokenRefresher = api
+
+    /**
+     * The walk-history seam [WalkRepository] persists through, bound here rather
+     * than constructed inside it so a JVM test can substitute an in-memory store.
+     */
+    @Provides
+    @Singleton
+    fun provideWalkHistoryStore(store: PrefsWalkHistoryStore): WalkHistoryStore = store
 }

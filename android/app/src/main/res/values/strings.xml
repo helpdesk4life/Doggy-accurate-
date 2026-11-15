@@ -16,7 +16,17 @@
     <string name="action_start">Start walk</string>
     <string name="action_stop">Stop walk</string>
     <string name="action_settings">Settings</string>
+    <string name="action_history">Walk history</string>
     <string name="action_recenter">Recenter</string>
+
+    <string name="history_title">Walk history</string>
+    <string name="history_empty">No walks yet. Start one from the map.</string>
+    <string name="history_stats">%1$s · %2$s · %3$s</string>
+    <string name="history_delete">Remove this walk</string>
+    <plurals name="history_dogs_met">
+        <item quantity="one">%1$d dog met</item>
+        <item quantity="other">%1$d dogs met</item>
+    </plurals>
 
     <string name="permission_rationale_title">Permissions needed</string>
     <string name="permission_rationale_body">DogWalk needs precise location to place you on the map and to find walkers within 500 m. Notification permission lets us alert you when someone is nearby.</string>

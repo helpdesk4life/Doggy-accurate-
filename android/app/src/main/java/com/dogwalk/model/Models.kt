@@ -84,3 +84,31 @@ data class BlockedWalker(
     val id: String,
     val name: String,
 )
+
+/** A dog met during a walk, remembered by name so the history can say who it was. */
+@Serializable
+data class MetDog(
+    val id: String,
+    val name: String,
+)
+
+/**
+ * One finished walk: when it started and ended, how far it went and which dogs
+ * came within the warning distance.
+ *
+ * Aggregates only, on purpose: no route and no coordinates are kept, so the
+ * history file is not a copy of the track the privacy design keeps off the wire
+ * in the first place. It lives in local storage and does not survive a reinstall,
+ * the same trade the marked-dogs list already makes.
+ */
+@Serializable
+data class WalkSummary(
+    val id: String,
+    val startedAtMillis: Long,
+    val endedAtMillis: Long,
+    val distanceMeters: Double,
+    val dogsMet: List<MetDog>,
+) {
+
+    val durationMillis: Long get() = endedAtMillis - startedAtMillis
+}

@@ -29,6 +29,7 @@ import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Pets
 import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.History
 import androidx.compose.material.icons.outlined.MyLocation
 import androidx.compose.material.icons.outlined.Settings
 import androidx.compose.material3.AlertDialog
@@ -56,6 +57,7 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.res.pluralStringResource
 import androidx.compose.ui.res.stringResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -72,17 +74,27 @@ import com.dogwalk.model.ConnectionState
 import com.dogwalk.model.DogRelationship
 import com.dogwalk.model.MarkedDog
 import com.dogwalk.model.NearbyWalker
+import com.dogwalk.model.WalkSummary
 import com.dogwalk.service.LocationTrackingService
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.Locale
+import kotlin.math.roundToInt
 
 @Composable
 fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
     val state by viewModel.uiState.collectAsStateWithLifecycle()
     val deleteState by viewModel.deleteAccount.collectAsStateWithLifecycle()
     val blockState by viewModel.blockState.collectAsStateWithLifecycle()
+    val walks by viewModel.walks.collectAsStateWithLifecycle()
     val context = LocalContext.current
 
     var locationGranted by remember { mutableStateOf(hasLocationPermission(context)) }
     var showSettings by remember { mutableStateOf(false) }
+    var showHistory by remember { mutableStateOf(false) }
     var showDeleteAccount by remember { mutableStateOf(false) }
     var recenterSignal by remember { mutableIntStateOf(0) }
     var markTarget by remember { mutableStateOf<NearbyWalker?>(null) }
@@ -150,6 +162,7 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                             }
                         },
                         onOpenSettings = { showSettings = true },
+                        onOpenHistory = { showHistory = true },
                     )
                 } else {
                     PermissionPrompt(
@@ -158,6 +171,14 @@ fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
                 }
             }
         }
+    }
+
+    if (showHistory) {
+        HistoryDialog(
+            walks = walks,
+            onRemove = viewModel::removeWalk,
+            onDismiss = { showHistory = false },
+        )
     }
 
     if (showSettings) {
@@ -277,6 +298,7 @@ private fun WalkControls(
     state: MapUiState,
     onToggleTracking: () -> Unit,
     onOpenSettings: () -> Unit,
+    onOpenHistory: () -> Unit,
 ) {
     Row(verticalAlignment = Alignment.CenterVertically) {
         Icon(
@@ -299,6 +321,12 @@ private fun WalkControls(
                 },
                 style = MaterialTheme.typography.bodyMedium,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        IconButton(onClick = onOpenHistory) {
+            Icon(
+                imageVector = Icons.Outlined.History,
+                contentDescription = stringResource(R.string.action_history),
             )
         }
         IconButton(onClick = onOpenSettings) {
@@ -358,6 +386,103 @@ private fun PermissionPrompt(onRequest: () -> Unit) {
         Text(stringResource(R.string.permission_grant))
     }
 }
+
+/**
+ * Finished walks, newest first: when, how long, how far, and which dogs came
+ * close. One row per walk with a remove button; the list itself is capped in
+ * [com.dogwalk.data.history.WalkHistoryStore.MAX_ENTRIES].
+ */
+@Composable
+private fun HistoryDialog(
+    walks: List<WalkSummary>,
+    onRemove: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.history_title)) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                if (walks.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.history_empty),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                walks.forEach { walk ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = formatWalkDate(walk.startedAtMillis),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                text = stringResource(
+                                    R.string.history_stats,
+                                    formatDuration(walk.durationMillis),
+                                    formatDistance(walk.distanceMeters),
+                                    pluralStringResource(
+                                        R.plurals.history_dogs_met,
+                                        walk.dogsMet.size,
+                                        walk.dogsMet.size,
+                                    ),
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            if (walk.dogsMet.isNotEmpty()) {
+                                Text(
+                                    text = walk.dogsMet.joinToString(", ") { it.name },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.secondary,
+                                )
+                            }
+                        }
+                        IconButton(onClick = { onRemove(walk.id) }) {
+                            Icon(
+                                imageVector = Icons.Outlined.Close,
+                                contentDescription = stringResource(R.string.history_delete),
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.settings_cancel))
+            }
+        },
+    )
+}
+
+private fun formatWalkDate(millis: Long): String =
+    LocalDateTime.ofInstant(Instant.ofEpochMilli(millis), ZoneId.systemDefault())
+        .format(DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT, FormatStyle.SHORT))
+
+private fun formatDuration(millis: Long): String {
+    val totalSeconds = millis / 1_000
+    val hours = totalSeconds / 3_600
+    val minutes = totalSeconds % 3_600 / 60
+    val seconds = totalSeconds % 60
+    return when {
+        hours > 0 -> "$hours h ${minutes.toString().padStart(2, '0')} min"
+        minutes > 0 -> "$minutes min"
+        else -> "$seconds s"
+    }
+}
+
+private fun formatDistance(meters: Double): String =
+    if (meters < 1_000) "${meters.roundToInt()} m"
+    else String.format(Locale.getDefault(), "%.1f km", meters / 1_000.0)
 
 @Composable
 private fun SettingsDialog(

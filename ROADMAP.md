@@ -277,10 +277,11 @@ deploy mid-evening annoys someone.
 
 ## P2 — quality, before or shortly after launch
 
-- **Android tests cover four classes.** 33 tests: `WalkSocketClient`,
-  `WalkRepository`, `AuthStore` and `HttpBase`. `WalkRepository` was the valuable
-  one and is done — it runs on three interfaces (`WalkSettings`, `WalkTransport`,
-  `TokenRefresher`), so it needs no `Context`. `SettingsStore`,
+- **Android tests cover five areas.** 48 tests: `WalkSocketClient`,
+  `WalkRepository`, `AuthStore`, `HttpBase`, and now the walk history
+  (`WalkStatsRecorder`, `WalkHistoryStore`). `WalkRepository` was the valuable
+  one and is done — it runs on its seams (`WalkSettings`, `WalkTransport`,
+  `TokenRefresher`, `WalkHistoryStore`), so it needs no `Context`. `SettingsStore`,
   `NotificationHelper` and the Compose UI still have no tests at all.
 - **CI is green but cannot gate anything.** `.github/workflows/ci.yml` runs all
   three jobs on every push and passed on `9bd0114` (134 backend tests, 56/56 e2e,
@@ -327,7 +328,12 @@ deploy mid-evening annoys someone.
 
 ## P3 — product ideas, not commitments
 
-- Walk history and stats (distance, duration, dogs met).
+- ~~Walk history and stats (distance, duration, dogs met).~~ **Done** — client-side
+  only: `WalkStatsRecorder` accumulates the walk from the app's own GPS fixes and
+  the arrivals it already receives, and `PrefsWalkHistoryStore` keeps the finished
+  summaries (aggregates, never a route) in SharedPreferences, capped at 100. The
+  history dialog sits behind the clock icon on the map screen. See **Walk history**
+  in `HANDOFF.md`.
 - ~~Block or mute a specific walker.~~ **Done** — and done the way that makes
   someone feel safe: the filter is server-side, in `refresh_neighborhood`, so a
   blocked walker never receives the bearing at all. Invisibility is symmetric
@@ -378,11 +384,11 @@ security review and added the blocks API to `README.md`, which had never
 documented it, plus the two email test files. Current gate: 207 backend tests,
 56/56 e2e, 33 Android tests, 0 lint errors, 16/16 on the VPS.
 
-The next visible thing is **walk history and stats** (P3): distance, duration and
-dogs met are all derivable from what the app already receives, and it is the
-first feature that gives a walk a reason to end. **Report a walker** is the other
-half of the safety story and would reuse the block plumbing — a report is a block
-plus a row an operator can read.
+**Walk history and stats landed** (P3): distance, duration and dogs met, all
+derived client-side from what the app already receives — the first feature that
+gives a walk a reason to end. The next visible thing is **report a walker**: the
+other half of the safety story, and it would reuse the block plumbing — a report
+is a block plus a row an operator can read.
 
 ## Decisions I would like from you
 

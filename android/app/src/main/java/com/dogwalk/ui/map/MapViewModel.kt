@@ -7,12 +7,14 @@ import com.dogwalk.data.auth.AuthApi
 import com.dogwalk.data.auth.AuthState
 import com.dogwalk.data.auth.AuthStore
 import com.dogwalk.data.blocks.BlocksApi
+import com.dogwalk.data.history.WalkHistoryStore
 import com.dogwalk.data.repository.WalkRepository
 import com.dogwalk.model.BlockedWalker
 import com.dogwalk.model.ConnectionState
 import com.dogwalk.model.DogRelationship
 import com.dogwalk.model.MarkedDog
 import com.dogwalk.model.NearbyWalker
+import com.dogwalk.model.WalkSummary
 import com.dogwalk.model.WalkerLocation
 import dagger.hilt.android.lifecycle.HiltViewModel
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -63,7 +65,15 @@ class MapViewModel @Inject constructor(
     private val authStore: AuthStore,
     private val authApi: AuthApi,
     private val blocksApi: BlocksApi,
+    private val history: WalkHistoryStore,
 ) : ViewModel() {
+
+    /** Finished walks, newest first; the history dialog reads this. */
+    val walks: StateFlow<List<WalkSummary>> = history.walks
+
+    fun removeWalk(id: String) {
+        history.remove(id)
+    }
 
     private data class Session(
         val self: WalkerLocation?,

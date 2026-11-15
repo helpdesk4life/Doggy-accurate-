@@ -3,6 +3,8 @@ package com.dogwalk.data.repository
 import com.dogwalk.data.WalkSettings
 import com.dogwalk.data.auth.AuthStore
 import com.dogwalk.data.auth.TokenRefresher
+import com.dogwalk.data.history.WalkHistoryStore
+import com.dogwalk.data.history.WalkStatsRecorder
 import com.dogwalk.data.remote.FrameTypes
 import com.dogwalk.data.remote.ServerFrame
 import com.dogwalk.data.remote.WalkTransport
@@ -37,6 +39,7 @@ class WalkRepository @Inject constructor(
     private val settings: WalkSettings,
     private val authStore: AuthStore,
     private val authApi: TokenRefresher,
+    private val history: WalkHistoryStore,
     @param:ApplicationScope private val scope: CoroutineScope,
 ) {
     private val _isTracking = MutableStateFlow(false)
@@ -66,9 +69,13 @@ class WalkRepository @Inject constructor(
     /** Walkers already alerted on, so a walker standing still does not buzz every fix. */
     private var alertedIds: Set<String> = emptySet()
 
+    /** Stats of the walk in progress; null when not tracking. */
+    private var recorder: WalkStatsRecorder? = null
+
     fun startTracking() {
         if (_isTracking.value) return
         _isTracking.value = true
+        recorder = WalkStatsRecorder().apply { start(System.currentTimeMillis()) }
         socket.connect(
             endpoint = settings.backendUrl.value,
             displayName = settings.displayName.value,
@@ -84,6 +91,7 @@ class WalkRepository @Inject constructor(
     }
 
     fun stopTracking() {
+        finishWalk()
         _isTracking.value = false
         frameJob?.cancel()
         frameJob = null
@@ -95,8 +103,20 @@ class WalkRepository @Inject constructor(
         alertedIds = emptySet()
     }
 
+    /**
+     * Persist the finished walk, whether it ended because the user stopped it or
+     * because the session died mid-walk. Both paths funnel through here.
+     */
+    private fun finishWalk() {
+        recorder?.let { recorder ->
+            recorder.finish(System.currentTimeMillis())?.let(history::add)
+        }
+        recorder = null
+    }
+
     fun publishLocation(location: WalkerLocation) {
         _self.value = location
+        recorder?.onLocation(location)
         socket.sendLocation(
             latitude = location.latitude,
             longitude = location.longitude,
@@ -128,6 +148,7 @@ class WalkRepository @Inject constructor(
      * abort before the session is cleared.
      */
     private fun signOut() {
+        finishWalk()
         _isTracking.value = false
         frameJob?.cancel()
         frameJob = null
@@ -166,8 +187,10 @@ class WalkRepository @Inject constructor(
                     val emptied = ids.isEmpty() && alertedIds.isNotEmpty()
                     alertedIds = ids
                     when {
-                        arrived.isNotEmpty() ->
+                        arrived.isNotEmpty() -> {
+                            recorder?.onDogsMet(arrived)
                             _proximityEvents.tryEmit(ProximityEvent.Arrived(arrived))
+                        }
 
                         // The last one left. Withdraw the alert rather than leave it
                         // in the shade claiming a dog is nearby when it is not.
