@@ -62,19 +62,21 @@ owned by `thomas`.
 
 ### Discovered: the secrets file is stale
 
-- `ADMIN_PANEL_PASSWORD` and `CADDY_BASIC_AUTH_PASSWORD` in
-  `.secrets/dogwalk-secrets.env` do **not** match the deployment. The admin
-  password was scrypt-verified offline against the Redis hash (no match), and
-  Caddy returned a bodyless 401 — the request never reached FastAPI. Both were
-  set at deploy time (`deploy/VPS.md`: "the password was set at deploy time and is
-  not in this repository") and the local copy was never updated. That is why the
-  admin panel's own Email page could not be used here — the configuration was
-  written through root instead, with the same fields and values
-  `smtp_settings.save` writes.
-- The `SMTP_*` set, including the Gmail app password, is now recorded in
-  `.secrets/dogwalk-secrets.env` alongside the rest.
-- **Worth doing**: rotate the admin password (and record it), or put the live
-  values in the secrets file so the panel is scriptable again.
+- **`ADMIN_PANEL_PASSWORD` is fixed** — rotated the same day and recorded, see the
+  next section. **`CADDY_BASIC_AUTH_PASSWORD` is still the one stale entry**: the
+  deploy-time Caddy `basic_auth` password does not match the local record, proven
+  by a bodyless 401 from Caddy (the request never reached FastAPI). It only guards
+  the browser path — `/admin*` over HTTPS — which is why the panel could not be
+  driven programmatically here; the box's loopback reaches the app directly and
+  was used instead. `deploy/VPS.md` says the password was set at deploy time and
+  is not in the repository; rotating it is `caddy hash-password` plus the
+  `deploy/Caddyfile` hash plus a reload, then update the secrets file.
+- The `SMTP_*` set, including the Gmail app password, is recorded in
+  `.secrets/dogwalk-secrets.env` alongside the rest. With the admin password
+  rotated (below) and the JWT synced, `CADDY_BASIC_AUTH_PASSWORD` is the only
+  entry in the file that does not match the deployment — except `THOMAS_USER_PASSWORD`,
+  which matches no known account (the only walker on the box is the emulator
+  test account) and may belong to an account that no longer exists.
 
 ### Two secrets appeared in this session's transcript
 
@@ -91,10 +93,22 @@ never printed the value, and sync was proven by matching SHA-256 fingerprints
 (`10d65302dc6eefc5`) rather than by printing either side. Every session that
 existed before the rotation — the admin panel included — is now signed with a
 dead key and must sign in again. The SMTP configuration survived the restart
-(Email page slot and env both intact). The **admin panel password** is still the
-one that leaked, and still does not match the stale copy in the secrets file;
-rotating it is `scripts/create_admin.py` or the Redis record plus a note in the
-secrets file, whenever you say so.
+(Email page slot and env both intact).
+
+**The admin panel password was rotated the same day.** `create_admin.py` creates
+but refuses an existing email (`admin.EmailTaken`), and there is no password-change
+route for operators — the gap the Known-gaps list already records — so the rotation
+is: delete the admin record, then re-run the app's own script inside the container
+to create a fresh one. Fresh scrypt hash, new admin id
+(`1aa429b76d814631afd2f5ca5eac7c10`), `token_version` back to 1. Because the whole
+record was replaced, every admin token ever issued — including anything minted
+during the leak window — is dead: `resolve_admin_token` looks the old id up and
+finds nothing. The stale login-failure counter went with the deleted keys. The new
+password (24-char urlsafe, generated locally, piped over SSH, never printed) is
+recorded in `.secrets/dogwalk-secrets.env`, and was verified two ways: scrypt
+against the Redis hash (`True`), and a real `POST /admin/auth/login` on the
+loopback returning 200 with the token written to a deleted temp file and never
+displayed.
 
 ## Session log — 2026-11-16 — the urgency ordering ranks who is present, not who arrived
 
@@ -1562,8 +1576,10 @@ next person meets it as a passing test rather than a mystery failure.
   `caddy hash-password` and reload. The app's own lockout is tighter than the
   walker one on purpose — 5 failures in 15 minutes, because a handful of operator
   accounts can each delete every account in the deployment — but there is still no
-  password-change flow for operators, so `scripts/create_admin.py` is the only way
-  to set one.
+  password-change flow for operators. `scripts/create_admin.py` creates but
+  **refuses an existing email** (`admin.EmailTaken`), so rotating an operator
+  password is delete-the-record-then-recreate — the procedure used on the VPS on
+  2026-11-16, recorded in that day's session log.
 - **A generated password is unrecoverable by design.** If the operator loses it
   before handover, the account must be deleted and recreated. Worth a "copy"
   button on the notice if this ever gets used by someone other than you.
