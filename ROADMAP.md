@@ -27,14 +27,12 @@ cd /c/Users/thoma/Downloads/dog/backend
 ./.venv/Scripts/python.exe scripts/e2e.py        # expect 56/56
 ```
 
-**The tree is clean**, HEAD being `0906161` (the vulnerability scanners, PR #13),
-on top of the pip floor bumps (#2–#6), walk history (`c9313d1`), and the earlier
-SMTP work (`e624390`, `15ddb85`) and admin panel (`e5ed2ad`). See **Session log —
-2026-11-15** in `HANDOFF.md` for the full list, **What landed in `e5ed2ad`** for
-the panel, and **Blocking** for the block store.
-
-**PR #13 merged as `0906161`**: the dependency-vulnerability scanners
-(pip-audit + OSV-Scanner). No open PRs.
+**The tree is clean**, HEAD being the PR #13 squash merge `0906161` plus docs
+follow-ups — the dependency-vulnerability scanners (pip-audit + OSV-Scanner),
+on top of the pip floor bumps (#2–#6), walk history (`c9313d1`), and the
+earlier SMTP work (`e624390`, `15ddb85`) and admin panel (`e5ed2ad`). No open
+PRs. See **Session log — 2026-11-16** in `HANDOFF.md` for the full list, **What
+landed in `e5ed2ad`** for the panel, and **Blocking** for the block store.
 
 The app is signed in as `fresh@example.com` / `hunter2hunter2` with dog `Pickle`.
 `emma@example.com` also uses `hunter2hunter2`. `buddy@example.com` was created by

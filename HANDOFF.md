@@ -5,21 +5,24 @@ first when picking the project back up. For what to build next, see
 `ROADMAP.md`; for the iOS plan in full, `IOS-PORT.md`; for the iOS code that
 exists, `ios/README.md`.
 
-**`main` is clean and deployed to the VPS**, where `deploy/verify.sh` passes
-every check. `main` is `0906161`; see **Session log — 2026-11-16** below for what
-landed in the last session. The admin panel landed earlier as `e5ed2ad admin
-pagina en account creation`, on top of `7d26413 Eerste versie`; see **What
-landed in `e5ed2ad`** at the bottom for what that commit contains.
+**`main` is clean.** `main` is the PR #13 squash merge `0906161` plus docs
+follow-ups; the VPS was not redeployed for PR #13 because it is CI and docs
+only — the backend image is unchanged. See **Session log — 2026-11-16** below
+for what landed in the last session. The admin panel
+landed earlier as `e5ed2ad admin pagina en account creation`, on top of
+`7d26413 Eerste versie`; see **What landed in `e5ed2ad`** at the bottom for
+what that commit contains.
 
 **No open PRs.** PR #13 (the dependency-vulnerability scanners) merged as
-`0906161`. Read **Session log — 2026-11-16** first.
+`0906161`, with docs follow-ups on top. Read **Session log — 2026-11-16**
+first.
 
 ## Session log — 2026-11-16 — PR #13 merged: OSV-Scanner replaces dependency-check
 
 Branch `vibe/vuln-scanners-056e99`, HEAD `05eab15`, pushed to both `github`
 and `origin`. PR #13 was ready for review, `mergeable_state: clean`, CI 3/3
-green on run `43824637127`. **Merged as `0906161`** (squash); `main` is that
-commit.
+green on run `43824637127`. **Merged as `0906161`** (squash); docs follow-ups
+are on top.
 
 ### What changed
 
