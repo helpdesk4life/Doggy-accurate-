@@ -27,15 +27,14 @@ cd /c/Users/thoma/Downloads/dog/backend
 ./.venv/Scripts/python.exe scripts/e2e.py        # expect 56/56
 ```
 
-**The tree is clean**, HEAD being `c2c3af6` (the Android toolchain group, PR #12),
+**The tree is clean**, HEAD being `0906161` (the vulnerability scanners, PR #13),
 on top of the pip floor bumps (#2–#6), walk history (`c9313d1`), and the earlier
 SMTP work (`e624390`, `15ddb85`) and admin panel (`e5ed2ad`). See **Session log —
 2026-11-15** in `HANDOFF.md` for the full list, **What landed in `e5ed2ad`** for
 the panel, and **Blocking** for the block store.
 
-**PR #13 is open and ready** on `vibe/vuln-scanners-056e99` (`7a4ccc4`): the
-dependency-vulnerability scanners. CI is 3/3 green; merging it is the next
-step. `main` stays at `d2f5018` until then.
+**PR #13 merged as `0906161`**: the dependency-vulnerability scanners
+(pip-audit + OSV-Scanner). No open PRs.
 
 The app is signed in as `fresh@example.com` / `hunter2hunter2` with dog `Pickle`.
 `emma@example.com` also uses `hunter2hunter2`. `buddy@example.com` was created by

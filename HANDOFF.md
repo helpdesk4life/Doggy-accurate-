@@ -6,20 +6,20 @@ first when picking the project back up. For what to build next, see
 exists, `ios/README.md`.
 
 **`main` is clean and deployed to the VPS**, where `deploy/verify.sh` passes
-every check. `main` is `d2f5018`; see **Session log — 2026-11-15** below for what
+every check. `main` is `0906161`; see **Session log — 2026-11-16** below for what
 landed in the last session. The admin panel landed earlier as `e5ed2ad admin
 pagina en account creation`, on top of `7d26413 Eerste versie`; see **What
 landed in `e5ed2ad`** at the bottom for what that commit contains.
 
-**One PR is open: #13 on `vibe/vuln-scanners-056e99`** — the
-dependency-vulnerability scanners. It is finished, CI is 3/3 green and it is
-ready for review; **not merged**. Read **Session log — 2026-11-16** first.
+**No open PRs.** PR #13 (the dependency-vulnerability scanners) merged as
+`0906161`. Read **Session log — 2026-11-16** first.
 
-## Session log — 2026-11-16 — PR #13 finished: OSV-Scanner replaces dependency-check
+## Session log — 2026-11-16 — PR #13 merged: OSV-Scanner replaces dependency-check
 
-Branch `vibe/vuln-scanners-056e99`, HEAD `7a4ccc4`, pushed to both `github`
-and `origin`. PR #13 is ready for review, `mergeable_state: clean`, CI 3/3
-green on run `43824637127`. **Not merged** — `main` is still `d2f5018`.
+Branch `vibe/vuln-scanners-056e99`, HEAD `05eab15`, pushed to both `github`
+and `origin`. PR #13 was ready for review, `mergeable_state: clean`, CI 3/3
+green on run `43824637127`. **Merged as `0906161`** (squash); `main` is that
+commit.
 
 ### What changed
 
