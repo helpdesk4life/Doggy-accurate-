@@ -81,8 +81,20 @@ owned by `thomas`.
 The admin panel password leaked via a Python traceback from a too-clever
 substitution (my error), and `JWT_SECRET` was printed by an `.env` dump whose mask
 covered only the SMTP line. Both live in the local Vibe session log on this
-machine only. **Rotating `JWT_SECRET` invalidates every session and is one line
-plus a restart — say the word.**
+machine only.
+
+**`JWT_SECRET` was rotated the same day.** A fresh 48-byte urlsafe secret was
+generated on the box, installed into the `.env`, and baked in with a container
+recreate — health 200, no boot failure. The local
+`.secrets/dogwalk-secrets.env` was updated from the box through a capture that
+never printed the value, and sync was proven by matching SHA-256 fingerprints
+(`10d65302dc6eefc5`) rather than by printing either side. Every session that
+existed before the rotation — the admin panel included — is now signed with a
+dead key and must sign in again. The SMTP configuration survived the restart
+(Email page slot and env both intact). The **admin panel password** is still the
+one that leaked, and still does not match the stale copy in the secrets file;
+rotating it is `scripts/create_admin.py` or the Redis record plus a note in the
+secrets file, whenever you say so.
 
 ## Session log — 2026-11-16 — the urgency ordering ranks who is present, not who arrived
 
