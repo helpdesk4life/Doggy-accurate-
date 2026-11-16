@@ -8,6 +8,28 @@ plugins {
     alias(libs.plugins.hilt)
 }
 
+// Dependency locking feeds the vulnerability gate (UPGRADING.md, "Vulnerability
+// scanning"). CI scans the committed app/gradle.lockfile with OSV-Scanner, so
+// the lockfile is the list of packages that get audited. Regenerate it after
+// any dependency change:
+//
+//     ./gradlew :app:dependencies --write-locks
+//
+// Only the two runtime classpaths are locked. lockAllConfigurations() would
+// also lock androidLintTool, the Hilt/KSP annotation-processor classpaths and
+// AGP's internal KSP classpath, which drag in build-time tooling (guava,
+// commons-lang3, httpclient, bouncycastle) that never ships in the APK. Locking
+// those makes the vulnerability scan report on the build tools instead of the
+// app.
+// configureEach, not named(): AGP creates these configurations after the build
+// script body has run, so a direct lookup fails with "Configuration with name
+// 'debugRuntimeClasspath' not found".
+configurations.configureEach {
+    if (name == "debugRuntimeClasspath" || name == "releaseRuntimeClasspath") {
+        resolutionStrategy.activateDependencyLocking()
+    }
+}
+
 // Release signing is read from android/keystore.properties, which is gitignored.
 // Without it the release build still assembles, just unsigned, so a fresh clone
 // can build and test without a keystore.

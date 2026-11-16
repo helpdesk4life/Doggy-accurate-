@@ -9,6 +9,11 @@ android/captures/
 *.apk
 *.aab
 
+# Written by `./gradlew :app:dependencies --write-locks` next to the real
+# android/app/gradle.lockfile. It only records version-catalog resolution and
+# is not scanned, so keep it out of the tree.
+android/settings-gradle.lockfile
+
 # Python
 backend/.venv/
 backend/__pycache__/

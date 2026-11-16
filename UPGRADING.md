@@ -21,6 +21,7 @@ Review and merge those like any other PR: the gates below still apply.
 | Gradle wrapper | `android/gradle/wrapper/gradle-wrapper.properties` | 9.9.1 | services.gradle.org |
 | Docker images | `backend/docker-compose.yml`, `backend/Dockerfile` | redis:7-alpine, caddy:2-alpine, python:3.12-slim | Docker Hub |
 | GitHub Actions | `.github/workflows/ci.yml` `uses:` | checkout@v7, setup-python@v7, setup-java@v6, setup-android@v4, setup-gradle@v6, upload-artifact@v7 | GitHub Marketplace; Dependabot already bumps these |
+| Vulnerability scanners | `ci.yml` audit steps, `android/app/gradle.lockfile` | pip-audit (installed fresh in CI), OSV-Scanner 2.7.1 | PyPI / GitHub releases |
 
 ## Runbooks
 
@@ -77,6 +78,14 @@ Gates: unit tests + lint 0 errors (CI runs exactly this). If `compileSdk`
 moves, also update `packages: "platforms;android-XX build-tools;XX.0.0"` in
 `ci.yml` in the same PR.
 
+Any dependency change also needs the lockfile regenerated, or the build fails
+with a missing lock state and the vulnerability scan audits the old versions:
+
+```bash
+./gradlew :app:dependencies --write-locks
+git add app/gradle.lockfile
+```
+
 ### Gradle wrapper
 
 ```bash
@@ -103,18 +112,50 @@ Already automated: Dependabot bumps the `uses:` majors weekly
 (`package-ecosystem: github-actions`). Just review the PR and let CI run —
 the three jobs (backend pytest, Android tests+lint, e2e) are the check.
 
+### Vulnerability scanning
+
+Both scanners are gates in `ci.yml`, so every PR and every run on `main` is
+audited — including Dependabot's weekly bumps.
+
+- Backend: a `pip-audit` step in the `backend` job audits the environment
+  pytest just installed — transitive dependencies included. pip is upgraded
+  first so the runner's own pip cannot produce findings that are not project
+  dependencies; `--strict` fails if dependency collection breaks. Reproduce
+  locally with `pip install -U pip pip-audit && pip-audit --strict` inside
+  the backend venv.
+- Android: OSV-Scanner 2.7.1 scans `android/app/gradle.lockfile` in the
+  `android` job. The lockfile is committed and is the list of packages that
+  get audited; it is written from `debugRuntimeClasspath` and
+  `releaseRuntimeClasspath` only, so build-time tooling (lint, the Hilt/KSP
+  annotation processors, AGP internals) is not scanned. Any known
+  vulnerability fails the job — there is no CVSS threshold.
+- **Regenerate the lockfile after any dependency change**, or the build fails
+  with a missing lock state:
+  `cd android && ./gradlew :app:dependencies --write-locks`.
+- A true finding is fixed by bumping the dependency in the same PR (this
+  file's runbooks). OSV-Scanner has no suppression file; a false positive
+  goes into `android/osv-scanner.toml` as an `[[IgnoredVulns]]` entry with a
+  `reason` and an `effectiveUntil` date — never ignore a whole dependency.
+- OSV-Scanner needs no API key and no database download. The CI step pins
+  v2.7.1 and verifies its SHA-256 before running it.
+- This replaced OWASP dependency-check, which needed an `NVD_API_KEY`, a
+  343 MB NVD database and a cold download that outlasted the job timeout, and
+  which failed the build whenever NVD returned 503. Do not reintroduce it.
+
 ## Universal checklist (every dependency PR)
 
 1. One group per PR; say what moved and why in the PR body.
 2. Local gates green: `pytest -q`, ruff `F,E9`, `scripts/e2e.py`,
    `./gradlew :app:testDebugUnitTest :app:lintDebug` as applicable.
+   The vulnerability scanners (`pip-audit`, OSV-Scanner) run in CI as part
+   of the same gate — see "Vulnerability scanning" above.
 3. CI green on the PR: backend, android, e2e jobs.
 4. Deploy to the VPS, then `sudo bash deploy/verify.sh` → 16/16 PASS.
 5. Update this file's "current" column and `HANDOFF.md`'s environment facts.
 
 ## Known gap
 
-There is no dependency-vulnerability scanner in CI yet (TEST-REPORT
-recommendation 4). When one is added (`pip-audit` for the backend, OWASP
-dependency-check for Android), wire it into the same checklist as step 2 and
-let Dependabot's `security-updates` ride along with the weekly PRs.
+Closed 2026-11-15 (TEST-REPORT recommendation 4): both scanners described
+under "Vulnerability scanning" above are wired into CI as gates. Dependabot's
+`security-updates` ride along with the weekly PRs and are audited by the same
+gates before merge.

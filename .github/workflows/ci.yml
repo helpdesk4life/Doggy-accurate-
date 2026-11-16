@@ -41,10 +41,23 @@ jobs:
         working-directory: backend
         run: python -m pytest -q
 
+      # Gate: audits the full environment pytest just ran against — transitive
+      # dependencies included. pip is upgraded first so the runner's own pip
+      # cannot produce findings that are not project dependencies; --strict
+      # fails the audit if dependency collection breaks instead of silently
+      # skipping packages.
+      - name: Audit dependencies (pip-audit)
+        working-directory: backend
+        run: |
+          python -m pip install -U pip pip-audit
+          pip-audit --strict
+
   android:
     name: Android tests and lint
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Cold Gradle cache plus an AGP/KSP compile; the dependency scan itself
+    # takes seconds.
+    timeout-minutes: 30
     steps:
       - uses: actions/checkout@v7
 
@@ -68,6 +81,25 @@ jobs:
       - name: Run unit tests and lint
         working-directory: android
         run: ./gradlew :app:testDebugUnitTest :app:lintDebug --continue --console=plain
+
+      # Gate: fails on any known vulnerability in the app's runtime
+      # dependencies. OSV-Scanner reads the committed app/gradle.lockfile,
+      # which Gradle writes from debugRuntimeClasspath + releaseRuntimeClasspath
+      # (see the activateDependencyLocking calls in app/build.gradle.kts).
+      #
+      # This replaced OWASP dependency-check, which needed an NVD API key, a
+      # 343 MB database and a cold download that outlasted the job timeout, and
+      # which failed the build whenever NVD returned 503. OSV.dev needs no key
+      # and answers in seconds. The binary is pinned and checksum-verified so a
+      # swapped release asset cannot silently run here.
+      - name: Scan dependencies (OSV-Scanner)
+        working-directory: android
+        run: |
+          curl -sSL -o /tmp/osv-scanner \
+            https://github.com/google/osv-scanner/releases/download/v2.7.1/osv-scanner_linux_amd64
+          echo "fb7dab19a8bd9bbe5c3189f09d4b7ee1820c9553a23bac202648a56efd2f6ee8  /tmp/osv-scanner" | sha256sum -c -
+          chmod +x /tmp/osv-scanner
+          /tmp/osv-scanner scan --lockfile=app/gradle.lockfile
 
       - name: Upload reports
         if: failure()
