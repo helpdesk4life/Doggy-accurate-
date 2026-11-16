@@ -6,21 +6,22 @@ first when picking the project back up. For what to build next, see
 exists, `ios/README.md`.
 
 **`main` is clean.** `main` is the PR #13 squash merge `0906161` plus docs
-follow-ups; the VPS was not redeployed for PR #13 because it is CI and docs
-only — the backend image is unchanged. See **Session log — 2026-11-16** below
-for what landed in the last session. The admin panel
+follow-ups, then the three Android PRs described just below. The VPS was not
+redeployed for any of them — the backend image is unchanged throughout. See
+**Session log — 2026-11-16** below for what landed in the last session. The admin panel
 landed earlier as `e5ed2ad admin pagina en account creation`, on top of
 `7d26413 Eerste versie`; see **What landed in `e5ed2ad`** at the bottom for
 what that commit contains.
 
-**Three open PRs, in merge order.** PR #14 (`fix/proximity-alert-refresh`) stops
-the proximity alert keeping a walker that left; PR #16 (`fix/proximity-urgency`) is
-stacked on it and makes the urgency ordering rank who is *present* rather than who
-just arrived, so it supersedes #14's `silent` parameter — merge #14 first, then
-rebase #16. PR #15 (`perf/stationary-cadence`) is the independent one, but it also
-touches these two files, so it rebases after whichever lands second. PR #13 (the
-dependency-vulnerability scanners) merged as `0906161`, with docs follow-ups on
-top. Read **Session log — 2026-11-16** first.
+**All three Android PRs are merged.** On 2026-11-16, in this order: PR #14
+(`7a2803f`) stops the proximity alert keeping a walker that had left; PR #16
+(`f6ca3d8`) makes the urgency ordering rank who is present rather than who just
+arrived, superseding #14's `silent` parameter; PR #15 stops holding the GPS open
+while the walker stands still. All three are Android-side, so the backend image
+is unchanged and the VPS was not redeployed. The test counts inside each session
+log below were each true on its own branch; the current gate is under
+**Android tests**. PR #13 (the dependency-vulnerability scanners) merged as
+`0906161`, with docs follow-ups on top. Read **Session log — 2026-11-16** first.
 
 ## Session log — 2026-11-16 — the urgency ordering ranks who is present, not who arrived
 
@@ -143,6 +144,61 @@ text, and a refresh on top of it would be a second post for the same frame.
   checked: hold both inside the warning distance, then move one out and confirm
   the header changes without a sound.
 
+## Session log — 2026-11-16 — the GPS stops running while the walker stands still
+
+Branch `perf/stationary-cadence`, HEAD `d32f168`, pushed to both `github` and
+`origin`, PR #15. The third item on the priority list.
+
+### The problem
+
+`PRIORITY_HIGH_ACCURACY` every 5 s for the length of a walk keeps the GPS radio
+on for a position that is not changing. Standing still is the common case on a
+dog walk: the dog stops to sniff, the walker stops to talk.
+
+### What was ruled out
+
+`PRIORITY_BALANCED_POWER_ACCURACY` while stationary is the obvious fix and it is
+wrong here. A balanced fix is accurate to roughly 100 m, which is the whole
+warning distance, so it would replace a good position with a useless one. The
+saving has to come from the rate, not the accuracy.
+
+The other constraint is server-side: `WALKER_TTL_SECONDS` is 30 and the sweeper
+runs every 5 s, so a walker who stops sending fixes is removed from Redis and
+disappears from everyone else's map. Going quiet is not an option either.
+
+### The fix
+
+`MovementDetector` classifies each fix as moving or standing still, and the
+service swaps cadence on the transition:
+
+- **moving**: continuous `PRIORITY_HIGH_ACCURACY` every 5 s, unchanged;
+- **stationary**: no continuous request, one `getCurrentLocation` probe every
+  10 s, so the radio sleeps between probes.
+
+Two thresholds rather than one, because a single one flaps: 12 m is the noise band
+that counts as standing still, 30 m is how far the walker has to get from where
+they stopped before the walk counts as moving again. The anchor is not moved while
+the still count runs, so a slow walker is not mistaken for a stationary one —
+three 4 m steps are 12 m of real movement, but no single step looks like it.
+
+The 10 s probe is a third of the TTL. A probe that returns nothing re-sends the
+last known fix for the same reason, and a probe that throws does not end the loop:
+unlike a framework callback, an exception in a coroutine kills it for good, and the
+walker would then stop refreshing silently with the walk still running.
+
+### Verification
+
+- `./gradlew :app:testDebugUnitTest :app:lintDebug` → 54 tests, 0 failures, lint
+  0 errors and no new warnings (39, all pre-existing).
+- Six tests on the detector: first fix is moving, three fixes inside the radius are
+  stationary, a walker who keeps walking never goes stationary, a stationary walker
+  who walks away is moving again, noise inside the moving radius does not flip the
+  verdict, and `reset` returns to moving.
+- **The service side is not verified.** It needs a device, and it is the one part
+  of this the JVM suite cannot reach. Worth a manual pass: start a walk, stand
+  still for a minute, confirm the fix rate drops and the walker stays on a second
+  device's map, then walk 50 m and confirm the rate comes back.
+
 ## Session log — 2026-11-16 — PR #13 merged: OSV-Scanner replaces dependency-check
 
 Branch `vibe/vuln-scanners-056e99`, HEAD `05eab15`, pushed to both `github`
@@ -190,7 +246,7 @@ form.
 
 ### Verification
 
-- `./gradlew :app:testDebugUnitTest :app:lintDebug` → 50 tests, 0 failures,
+- `./gradlew :app:testDebugUnitTest :app:lintDebug` → 48 tests, 0 failures,
   lint 0 errors.
 - `osv-scanner scan --lockfile=app/gradle.lockfile` → 135 packages,
   "No issues found", exit 0. Adding `commons-lang3:3.16.0` to a copy makes it
@@ -1218,7 +1274,7 @@ throwaway account derived from `--email`.
 
 ## Android tests
 
-50 JVM tests in `android/app/src/test/`, run with
+64 JVM tests in `android/app/src/test/`, run with
 `./gradlew :app:testDebugUnitTest`. No emulator, no backend, no Robolectric.
 
 | File | Covers |
@@ -1229,6 +1285,8 @@ throwaway account derived from `--email`.
 | `data/remote/HttpBaseTest.kt` | `httpBaseOf()`: `ws` → `http`, `wss` → `https`, the query string dropped, and a URL without the socket path used as-is |
 | `data/history/WalkStatsRecorderTest.kt` | Distance accumulation, the jitter deadband, the glitch cap, dogs-met union, `finish` stamping |
 | `data/history/WalkHistoryStoreTest.kt` | Newest-first insert, the 100-entry cap, remove-by-id, the in-memory fake |
+| `geo/MovementDetectorTest.kt` | The stationary/moving rules: three fixes inside the 12 m band, a walker who keeps walking never goes stationary, 30 m to exit, noise does not flip the verdict, `reset` |
+| `notifications/ProximityAlertPolicyTest.kt` | The sound rule: sound only when the most urgent walker present is more urgent than what is showing — friend next to warning is silent, disliked next to friend sounds, a second disliked does not replay |
 | `testing/InMemorySecureStore.kt`, `testing/InMemoryWalkHistoryStore.kt` | Shared fakes, not tests |
 
 Six things about the setup that will cost time if undone:
@@ -1320,7 +1378,7 @@ GitHub Actions, on `github.com/helpdesk4life/doggy` (private). The first run,
 The two `skipped` steps in that run — `Upload reports` and `Dump container logs`
 — are both `if: failure()`, so skipping is the correct outcome on a green run.
 
-The suite has grown since: 207 backend tests and 33 Android tests as of the
+The suite has grown since: 207 backend tests and 54 Android tests as of the
 2026-11-14 doc sync. The GitHub connector does expose check runs after all —
 `pull_request_read` with `method: get_check_runs` returns per-job status and
 conclusion for a PR's head commit, which is how the #13 failure was found. It
@@ -1381,12 +1439,14 @@ next person meets it as a passing test rather than a mystery failure.
 ## Known gaps
 
 - **The Android tests cover the transport, the session, the repository, the auth
-  store and the walk history, not the rest.** 50 tests: `WalkSocketClient` (connect,
-  bearer header, frame decoding, 4401, reconnect, the backoff ladder), `WalkRepository`
-  (proximity bookkeeping, the session-renewal branches and recording the finished
-  walk), `AuthStore` (the sign-in state machine), `HttpBase` (the `ws` → `http`
-  mapping), `WalkStatsRecorder` and `WalkHistoryStore`. `SettingsStore`,
-  `NotificationHelper` and the Compose UI have none.
+  store, the walk history, the movement rules and the alert rule, not the rest.**
+  64 tests: `WalkSocketClient` (connect, bearer header, frame decoding, 4401,
+  reconnect, the backoff ladder), `WalkRepository` (proximity bookkeeping, the
+  session-renewal branches and recording the finished walk), `AuthStore` (the
+  sign-in state machine), `HttpBase` (the `ws` → `http` mapping),
+  `WalkStatsRecorder` and `WalkHistoryStore`, `MovementDetector`,
+  `ProximityAlertPolicy`. `SettingsStore`, the notification *posting* code and
+  the Compose UI still have none.
 - No reconnect backoff tuning — the client reconnects, but the retry cadence has
   not been stress-tested against a backend that stays down.
 - ~~**The proximity alert is withdrawn when the last walker leaves the warning

@@ -280,12 +280,14 @@ deploy mid-evening annoys someone.
 
 ## P2 — quality, before or shortly after launch
 
-- **Android tests cover five areas.** 50 tests: `WalkSocketClient`,
+- **Android tests cover five areas, seven now.** 64 tests: `WalkSocketClient`,
   `WalkRepository`, `AuthStore`, `HttpBase`, and now the walk history
-  (`WalkStatsRecorder`, `WalkHistoryStore`). `WalkRepository` was the valuable
+  (`WalkStatsRecorder`, `WalkHistoryStore`), `MovementDetector` and
+  `ProximityAlertPolicy`. `WalkRepository` was the valuable
   one and is done — it runs on its seams (`WalkSettings`, `WalkTransport`,
   `TokenRefresher`, `WalkHistoryStore`), so it needs no `Context`. `SettingsStore`,
-  `NotificationHelper` and the Compose UI still have no tests at all.
+  the notification-posting code and the Compose UI still have no tests at all
+  (the alert rule that drove the posting *is* tested, as `ProximityAlertPolicy`).
 - **CI is green but cannot gate anything.** `.github/workflows/ci.yml` runs all
   three jobs on every push and passed on `9bd0114` (134 backend tests, 56/56 e2e,
   Android tests + lint). The suite has since grown to 207 backend tests and 33
@@ -305,9 +307,15 @@ deploy mid-evening annoys someone.
   is also what stops a friend arriving next to a warning from replacing it with a
   chime. A quiet rebuild returns early when the slot is empty, so it cannot bring
   back an alert the user dismissed.
-- **Battery.** `PRIORITY_HIGH_ACCURACY` every 5 s for the length of a walk is
-  heavy. Consider `BALANCED` when the walker is stationary, or a longer interval
-  once the first fix lands.
+- ~~**Battery.** `PRIORITY_HIGH_ACCURACY` every 5 s for the length of a walk is
+  heavy.~~ Closed: `MovementDetector` classifies each fix as moving or standing
+  still, and the service swaps cadence on the transition — continuous
+  high-accuracy updates every 5 s while moving, one `getCurrentLocation` probe
+  every 10 s while stationary, so the radio sleeps between probes. `BALANCED` is
+  deliberately not used: a balanced fix is accurate to roughly 100 m, which is the
+  whole warning distance. The 10 s probe is a third of the server's 30 s
+  `WALKER_TTL_SECONDS`, so a stationary walker still refreshes their position and
+  stays on everyone else's map. Not yet measured on a device.
 - **No accessibility pass.** Content descriptions, touch target sizes and
   TalkBack have not been checked.
 - **No `/me` endpoint.** The app trusts the email it stored at login. If the
@@ -388,7 +396,7 @@ CA, blocking was recorded as not existing, the admin panel was recorded as havin
 no second gate, and four test counts were stale. The second pass followed the
 security review and added the blocks API to `README.md`, which had never
 documented it, plus the two email test files. Current gate: 207 backend tests,
-56/56 e2e, 50 Android tests, 0 lint errors, 16/16 on the VPS.
+56/56 e2e, 64 Android tests, 0 lint errors, 16/16 on the VPS.
 
 **Walk history and stats landed** (P3): distance, duration and dogs met, all
 derived client-side from what the app already receives — the first feature that
