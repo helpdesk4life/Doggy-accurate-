@@ -117,7 +117,13 @@ password (24-char urlsafe, generated locally, piped over SSH, never printed) is
 recorded in `.secrets/dogwalk-secrets.env`, and was verified two ways: scrypt
 against the Redis hash (`True`), and a real `POST /admin/auth/login` on the
 loopback returning 200 with the token written to a deleted temp file and never
-displayed.
+displayed. The admin login is an **email, not a name**:
+`thomas.feyens@gmail.com` (the panel's login form takes it; the Caddy popup
+in front of it takes user `thomas`). Neither is secret — the address is already
+the ACME contact in `deploy/Caddyfile` — but both are also recorded in
+`.secrets/dogwalk-secrets.env` (`ADMIN_PANEL_EMAIL`, `CADDY_BASIC_AUTH_USER`)
+beside their passwords, so the panel is reachable without rediscovering them
+via `scripts/create_admin.py --list` on the box.
 
 ## Session log — 2026-11-16 — the urgency ordering ranks who is present, not who arrived
 
