@@ -23,6 +23,67 @@ log below were each true on its own branch; the current gate is under
 **Android tests**. PR #13 (the dependency-vulnerability scanners) merged as
 `0906161`, with docs follow-ups on top. Read **Session log — 2026-11-16** first.
 
+## Session log — 2026-11-16 — SMTP live on the VPS, priority #1 closed
+
+Gmail as the provider, over the only port the box opens (465 SSL; 587 is blocked —
+the earlier finding that shaped this).
+
+### What is configured
+
+| Where | Value |
+| --- | --- |
+| Redis `dogwalk:settings:smtp` | host `smtp.gmail.com`, port `465`, `ssl`, sender+username `thomas.feyens@gmail.com`, app password |
+| `.env` on the box | `EMAIL_SENDER=smtp` + the full `SMTP_*` set; `ALLOW_LOGGING_EMAIL` removed |
+| Container env after recreate | `EMAIL_SENDER=smtp`, `ALLOW_LOGGING_EMAIL=0`, SMTP forward all correct |
+
+Two configuration paths live on purpose: a panel-saved config wins over the
+environment, so the Redis slot makes the next send work without a restart, and the
+`.env` makes it durable if Redis is ever wiped. Removing the acknowledgement is
+what makes the fallback safe: `Settings.validate()` now refuses to boot before it
+would ever log a code again.
+
+The backend container was recreated with `docker compose up -d` in
+`/home/thomas/dog/backend` to bake the new env in — the image itself is unchanged.
+A backup of the old `.env` sits next to it as `.env.bak-smtp-20261116`, mode 600,
+owned by `thomas`.
+
+### Verification
+
+- **Test before save**: one message through the app's own `SmtpEmailSender` and
+  `test_email_body`, executed inside the backend container before anything was
+  written — Gmail accepted it, and it landed in the mailbox (subject
+  "DogWalk SMTP test").
+- **End to end after the switch**: `POST /auth/password-reset/request` for the one
+  account on the box → 202. A reset code was generated (Redis index exists), and
+  the logs show zero `email to ` lines (the logging sender's signature, which
+  printed the code) and zero `could not send the reset email` lines (an SMTP
+  failure). The code left the backend in a mail body or nowhere.
+- Container env checked with `printenv`: `ALLOW_LOGGING_EMAIL` now bakes as `0`.
+
+### Discovered: the secrets file is stale
+
+- `ADMIN_PANEL_PASSWORD` and `CADDY_BASIC_AUTH_PASSWORD` in
+  `.secrets/dogwalk-secrets.env` do **not** match the deployment. The admin
+  password was scrypt-verified offline against the Redis hash (no match), and
+  Caddy returned a bodyless 401 — the request never reached FastAPI. Both were
+  set at deploy time (`deploy/VPS.md`: "the password was set at deploy time and is
+  not in this repository") and the local copy was never updated. That is why the
+  admin panel's own Email page could not be used here — the configuration was
+  written through root instead, with the same fields and values
+  `smtp_settings.save` writes.
+- The `SMTP_*` set, including the Gmail app password, is now recorded in
+  `.secrets/dogwalk-secrets.env` alongside the rest.
+- **Worth doing**: rotate the admin password (and record it), or put the live
+  values in the secrets file so the panel is scriptable again.
+
+### Two secrets appeared in this session's transcript
+
+The admin panel password leaked via a Python traceback from a too-clever
+substitution (my error), and `JWT_SECRET` was printed by an `.env` dump whose mask
+covered only the SMTP line. Both live in the local Vibe session log on this
+machine only. **Rotating `JWT_SECRET` invalidates every session and is one line
+plus a restart — say the word.**
+
 ## Session log — 2026-11-16 — the urgency ordering ranks who is present, not who arrived
 
 Branch `fix/proximity-urgency`, HEAD `b0c2513`, pushed to both `github` and
@@ -1476,13 +1537,13 @@ next person meets it as a passing test rather than a mystery failure.
   a code can still probe addresses, and a leaked code is a leaked invitation.
   Email verification is the general fix; until then keep `INVITE_REQUIRED=1` and
   mint codes one at a time.
-- **Reset emails need SMTP credentials to actually arrive.** The code path is
-  finished: `SmtpEmailSender` behind `EMAIL_SENDER=smtp`, plus an **Email** page in
-  the admin panel (`/admin/ui/smtp`) that stores a configuration in Redis, rebuilds
-  the running sender in place, and sends a test message through the values on
-  screen before you commit to them. What is missing is a provider account. Until
-  one is saved, the VPS runs `EMAIL_SENDER=logging` with `ALLOW_LOGGING_EMAIL=1`
-  and reset codes land in `docker compose logs backend`.
+- ~~**Reset emails need SMTP credentials to actually arrive.**~~ Closed: a Gmail
+  app password is configured on the VPS, in both places the design supports — the
+  panel's Redis slot (`dogwalk:settings:smtp`) and the `.env` (`EMAIL_SENDER=smtp`,
+  `ALLOW_LOGGING_EMAIL` removed). Port 465 SSL, the only outbound SMTP port the box
+  opens. Verified end to end: the test message arrived, and a real
+  `password-reset/request` created a code that appears nowhere in
+  `docker compose logs backend`. See **Session log — 2026-11-16**.
 - ~~**The admin panel has no second gate.**~~ Closed: `deploy/Caddyfile` puts
   Caddy `basic_auth` on `/admin*` (user `thomas`) ahead of the app's own login, and
   an unauthenticated request gets 401. The hash is bcrypt — rotate it with

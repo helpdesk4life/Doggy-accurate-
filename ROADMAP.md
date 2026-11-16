@@ -324,13 +324,13 @@ deploy mid-evening annoys someone.
   valid invite code has been spent, so an uninvited caller learns nothing. Anyone
   holding a code can still probe, and a leaked code is a leaked invitation. Email
   verification is the general fix and would let the gate come off.
-- **Reset codes still go to the log on the VPS.** The sender is written —
-  `SmtpEmailSender` behind `EMAIL_SENDER=smtp` — and the admin panel has an
-  **Email** page that saves a configuration, rebuilds the sender without a restart
-  and sends a test message first. But no provider account exists yet, so the
-  deployment runs `EMAIL_SENDER=logging` with `ALLOW_LOGGING_EMAIL=1` and
-  `Settings.validate()` lets it through. Until someone fills in that page, the
-  acknowledgement is the only thing standing between a log reader and any account.
+- ~~**Reset codes still go to the log on the VPS.**~~ Closed: SMTP is configured on
+  the box — Gmail over port 465 SSL, the only outbound SMTP port the VPS opens —
+  in both places the design supports: the panel's Redis slot and the `.env`
+  (`EMAIL_SENDER=smtp`, `ALLOW_LOGGING_EMAIL` removed, so `validate()` now refuses
+  a flip back to the logging sender). Verified end to end: the test message
+  arrived, and a real reset request produced a code that appears nowhere in
+  `docker compose logs backend`. See **Session log — 2026-11-16** in `HANDOFF.md`.
 - **`POST /blocks/{id}` is capped and throttled, not validated.** The route takes
   any 32-hex id and writes two keys, and an id that never belonged to an account
   is cleaned up by nothing except an unblock — so the list is capped at
@@ -416,10 +416,10 @@ All three from last session are answered and implemented:
 
 New ones, none of which block anything today:
 
-1. ~~**Email provider**~~ → **SMTP, provider-agnostic.** `SmtpEmailSender` speaks
-   plain SMTP, so Resend, Postmark, Mailgun, Fastmail or a local relay all work
-   without a code change. What is left is picking one and pasting the credentials
-   into the panel's **Email** page.
+1. ~~**Email provider**~~ → **Gmail, configured.** An app password is live on the
+   VPS over port 465 SSL, verified end to end. The sender stays
+   provider-agnostic: if Gmail's relay limits ever bite, Resend, Postmark,
+   Mailgun or Fastmail are a paste away with no code change.
 2. **Do you want email verification?** The enumeration gap is closed by invite
    codes, so this is no longer a security fix — it is what would let the gate come
    off and the app open to strangers. It adds a second email flow and a "not yet

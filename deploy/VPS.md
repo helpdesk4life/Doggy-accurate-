@@ -511,11 +511,13 @@ banned from auth.log; `deploy/verify.sh` still passes every check.
 
 ## What this does not do
 
-- **No SMTP credentials yet.** Reset codes go to the backend log, which is why
-  `ALLOW_LOGGING_EMAIL=1` is in the `.env`. Anyone who can read
-  `docker compose logs backend` can reset any account. The sender is written —
-  see **Switching reset emails to SMTP** above — so this is a provider account
-  and five lines of `.env`, not code.
+- ~~**No SMTP credentials yet.**~~ Closed on 2026-11-16: Gmail over port 465 SSL
+  (the only outbound SMTP port this box opens), configured both in the admin
+  panel's Redis slot and in the `.env` — `EMAIL_SENDER=smtp`, and
+  `ALLOW_LOGGING_EMAIL` removed so the boot cannot fall back to the log. Verified
+  end to end: a test message arrived and a real reset request's code appears
+  nowhere in `docker compose logs backend`. See the 2026-11-16 session log in
+  `HANDOFF.md` for what was stored where.
 - ~~**No second gate on the admin panel.**~~ Closed: `/admin*` sits behind
   Caddy `basic_auth` (user `thomas`) before the app's own login. The password
   was set at deploy time and is not in this repository — regenerate with
