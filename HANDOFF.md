@@ -23,6 +23,48 @@ log below were each true on its own branch; the current gate is under
 **Android tests**. PR #13 (the dependency-vulnerability scanners) merged as
 `0906161`, with docs follow-ups on top. Read **Session log — 2026-11-16** first.
 
+## Session log — 2026-11-16 — the day in one place
+
+Five threads, all closed on the same day. Each has its own detailed log below
+this entry, in this order.
+
+1. **PR #13 merged** (`0906161`) — the dependency scanners; OSV-Scanner had
+   replaced OWASP dependency-check after its NVD rate-limit failure, docs
+   follow-ups on top (`63a472f`, `2f2b72d`).
+2. **Three Android PRs merged, in that order** — #14 (`7a2803f`, the alert
+   refreshes when a walker leaves), #16 (`f6ca3d8`, urgency ranks who is
+   *present*, superseding #14's `silent` flag), #15 (`1ea8141`, the GPS sleeps
+   while the walker stands still). All Android-side; the backend image is
+   unchanged throughout.
+3. **SMTP went live on the VPS** (`5b36cde`) — Gmail app password over 465/SSL,
+   stored in both slots the design supports; reset codes leave the box in a
+   mail body or nowhere. Priority #1 closed.
+4. **Secrets reconciliation** — `JWT_SECRET` (`60d0fee`) and the admin password
+   (`ae48aa6`) leaked into this session's transcript and were rotated the same
+   day; `CADDY_BASIC_AUTH_PASSWORD` (`02d7e20`) never matched the deployment
+   and was rotated too. All three verified live on the box, and the local
+   `.secrets/dogwalk-secrets.env` now matches the deployment everywhere —
+   the panel login is recorded there as well (`ADMIN_PANEL_EMAIL`,
+   `CADDY_BASIC_AUTH_USER`, `99b95bc`).
+5. **The panel is reachable again** — the admin gate turned out to be the
+   *host's* systemd Caddy, not the compose container: Caddy user `thomas`, then
+   the app login `thomas.feyens@gmail.com`, both beside their passwords in the
+   secrets file.
+
+**End-of-day box state**: `deploy/verify.sh` passes 16/16 **when run as root**;
+as `thomas` two of its checks fail for permission reasons, not real ones
+(`caddy validate` as a non-root user, and the maps check that must read as the
+`caddy` user). The checkout is synced with `main` by `git pull` as `thomas`;
+the deployed backend image did not change all day — every box-side change was
+`.env`, Redis, or `/etc/caddy/Caddyfile`, each proven live in place, and only
+`.env` needed a container recreate.
+
+**Carried forward**: `THOMAS_USER_PASSWORD` matches no known account (delete the
+entry or explain it); still no operator password-change route (rotation is
+delete + `create_admin.py`); the email-verification decision; a reconnect
+backoff pass; accessibility; `/me`; blocks-cap atomicity; backups and
+monitoring on the box.
+
 ## Session log — 2026-11-16 — SMTP live on the VPS, priority #1 closed
 
 Gmail as the provider, over the only port the box opens (465 SSL; 587 is blocked —
@@ -547,9 +589,16 @@ backend port nor Redis is reachable from the LAN. Caddy on `8443` is the only wa
 in from outside.
 
 The VPS (`207.180.240.29`) is the production target: same two containers plus a
-host Caddy, running `f273169` with a clean tree, and
-`deploy/verify.sh` passes 16/16 there. It pulls from `github`, not `origin`, and
-`git` must run as `thomas` — root has no deploy key. See `deploy/VPS.md`.
+host Caddy. Its checkout tracks `main`, pulled as `thomas` from `github` (root
+has no deploy key) and synced again at the end of 2026-11-16. The deployed
+backend image did not change that day: every box-side change was the `.env`
+(JWT, SMTP), Redis (SMTP slot, replaced admin record) or the host
+`/etc/caddy/Caddyfile` (rotated gate hash), each proven live where it runs.
+`deploy/verify.sh` passes 16/16 there **as root** — as `thomas` two checks
+fail on permissions, not on reality. The panel is
+`https://backend.thomasfeyens.be/admin/ui`: Caddy user `thomas`, then app
+login `thomas.feyens@gmail.com`, both passwords in `.secrets/dogwalk-secrets.env`.
+See `deploy/VPS.md`.
 
 ## Resuming
 

@@ -27,13 +27,15 @@ cd /c/Users/thoma/Downloads/dog/backend
 ./.venv/Scripts/python.exe scripts/e2e.py        # expect 56/56
 ```
 
-**The tree is clean**, HEAD being the PR #13 squash merge `0906161` plus docs
-follow-ups — the dependency-vulnerability scanners (pip-audit + OSV-Scanner),
-on top of the pip floor bumps (#2–#6), walk history (`c9313d1`), and the
-earlier SMTP work (`e624390`, `15ddb85`) and admin panel (`e5ed2ad`). PR #14 is
-open on `fix/proximity-alert-refresh`. See **Session log — 2026-11-16** in
-`HANDOFF.md` for the full list, **What landed in `e5ed2ad`** for the panel, and
-**Blocking** for the block store.
+**The tree is clean**, HEAD `99b95bc` — PR #13 (`0906161`, dependency scanners:
+pip-audit + OSV-Scanner, docs on top), then the three Android PRs merged in
+order on 2026-11-16: #14 (`7a2803f`, alert refresh), #16 (`f6ca3d8`, urgency
+ranks who is present), #15 (`1ea8141`, GPS sleeps while stationary). The same
+day the VPS went live on SMTP, the three leaked-or-stale secrets were rotated
+(JWT, admin password, Caddy gate) and the panel login was recorded in the
+secrets file — see **Session log — 2026-11-16** in `HANDOFF.md`, **What landed
+in `e5ed2ad`** for the panel, and **Blocking** for the block store. Earlier
+layers: the pip floor bumps (#2–#6) and walk history (`c9313d1`).
 
 The app is signed in as `fresh@example.com` / `hunter2hunter2` with dog `Pickle`.
 `emma@example.com` also uses `hunter2hunter2`. `buddy@example.com` was created by
