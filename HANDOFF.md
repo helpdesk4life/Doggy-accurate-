@@ -13,9 +13,61 @@ landed earlier as `e5ed2ad admin pagina en account creation`, on top of
 `7d26413 Eerste versie`; see **What landed in `e5ed2ad`** at the bottom for
 what that commit contains.
 
-**No open PRs.** PR #13 (the dependency-vulnerability scanners) merged as
-`0906161`, with docs follow-ups on top. Read **Session log — 2026-11-16**
-first.
+**One open PR.** PR #14 (`fix/proximity-alert-refresh`) fixes the proximity alert
+that kept naming a dog that had left. PR #13 (the dependency-vulnerability
+scanners) merged as `0906161`, with docs follow-ups on top. Read **Session log —
+2026-11-16** first.
+
+## Session log — 2026-11-16 — the proximity alert stops naming a dog that left
+
+Branch `fix/proximity-alert-refresh`, HEAD `91625ab`, pushed to both `github`
+and `origin`, PR #14. The second item on the priority list, after the SMTP
+credentials that are still missing.
+
+### The bug
+
+The alert occupies a single notification slot (`PROXIMITY_NOTIFICATION_ID =
+2001`) and was only ever posted on arrival. `WalkRepository` compared the set of
+walkers inside the warning distance against `alertedIds` and emitted exactly two
+things: `Arrived` for the new ids, and `Cleared` when the set went empty. A set
+that shrank without emptying matched neither, so nothing was posted and the
+notification kept the text it was built with — naming a dog that had walked
+away.
+
+### The fix
+
+`ProximityEvent.Updated(walkers)` is the third case: the set changed without a
+new arrival, so the alert still applies but its text is stale. The repository
+emits it with `withinWarning`, the walkers still inside, and the service rebuilds
+the notification from that set.
+
+Two things make the refresh safe to post into the same slot:
+
+- `setOnlyAlertOnce(true)` is set **only** on the refresh path. The ROADMAP entry
+  said this flag could not be used, but that was about setting it on the shared
+  builder, where it would also silence the arrival. Per-path it does exactly what
+  is needed: an update of a notification that is already showing does not sound.
+- The refresh returns early when `activeNotifications` no longer holds id 2001.
+  `setAutoCancel(true)` makes a tap an acknowledgement, and a silent refresh must
+  not undo it by re-posting an alert the user dismissed.
+
+The `when` in `handleFrame` is ordered, so a frame where one walker leaves and
+another arrives takes the `Arrived` branch: the arrival already carries the new
+text, and a refresh on top of it would be a second post for the same frame.
+
+### Verification
+
+- `./gradlew :app:testDebugUnitTest :app:lintDebug` → 50 tests, 0 failures, lint
+  0 errors and no new warnings (39, all pre-existing).
+- CI 3/3 green on run `43827835515`.
+- Two new tests: `one of several walkers leaving refreshes the alert instead of
+  withdrawing it`, and `a walker leaving while another arrives alerts on the
+  arrival and does not also refresh`.
+- **Not verified on a device.** `NotificationHelper` needs a `Context` and the
+  project has no Robolectric, so the notification side is untested. Worth a
+  manual pass with two walkers on one socket, the way the withdrawal path was
+  checked: hold both inside the warning distance, then move one out and confirm
+  the header changes without a sound.
 
 ## Session log — 2026-11-16 — PR #13 merged: OSV-Scanner replaces dependency-check
 
@@ -64,7 +116,7 @@ form.
 
 ### Verification
 
-- `./gradlew :app:testDebugUnitTest :app:lintDebug` → 48 tests, 0 failures,
+- `./gradlew :app:testDebugUnitTest :app:lintDebug` → 50 tests, 0 failures,
   lint 0 errors.
 - `osv-scanner scan --lockfile=app/gradle.lockfile` → 135 packages,
   "No issues found", exit 0. Adding `commons-lang3:3.16.0` to a copy makes it
@@ -1092,13 +1144,13 @@ throwaway account derived from `--email`.
 
 ## Android tests
 
-48 JVM tests in `android/app/src/test/`, run with
+50 JVM tests in `android/app/src/test/`, run with
 `./gradlew :app:testDebugUnitTest`. No emulator, no backend, no Robolectric.
 
 | File | Covers |
 | --- | --- |
 | `data/auth/AuthStoreTest.kt` | The sign-in state machine: save, updateTokens, clear, and the three restore cases |
-| `data/repository/WalkRepositoryTest.kt` | Proximity bookkeeping (arrival once, not per fix; withdrawal on the last leaving and on a clear frame) and the three session-renewal branches |
+| `data/repository/WalkRepositoryTest.kt` | Proximity bookkeeping (arrival once, not per fix; a refresh when one of several leaves; withdrawal on the last leaving and on a clear frame) and the three session-renewal branches |
 | `data/remote/WalkSocketClientTest.kt` | Connect, bearer header, name query parameter, frame decoding, 4401, reconnect, disconnect, the backoff ladder |
 | `data/remote/HttpBaseTest.kt` | `httpBaseOf()`: `ws` → `http`, `wss` → `https`, the query string dropped, and a URL without the socket path used as-is |
 | `data/history/WalkStatsRecorderTest.kt` | Distance accumulation, the jitter deadband, the glitch cap, dogs-met union, `finish` stamping |
@@ -1255,7 +1307,7 @@ next person meets it as a passing test rather than a mystery failure.
 ## Known gaps
 
 - **The Android tests cover the transport, the session, the repository, the auth
-  store and the walk history, not the rest.** 48 tests: `WalkSocketClient` (connect,
+  store and the walk history, not the rest.** 50 tests: `WalkSocketClient` (connect,
   bearer header, frame decoding, 4401, reconnect, the backoff ladder), `WalkRepository`
   (proximity bookkeeping, the session-renewal branches and recording the finished
   walk), `AuthStore` (the sign-in state machine), `HttpBase` (the `ws` → `http`
@@ -1263,12 +1315,14 @@ next person meets it as a passing test rather than a mystery failure.
   `NotificationHelper` and the Compose UI have none.
 - No reconnect backoff tuning — the client reconnects, but the retry cadence has
   not been stress-tested against a backend that stays down.
-- **The proximity alert is withdrawn when the last walker leaves the warning
-  distance, but not when one of several leaves.** The notification names the most
-  urgent walker in the set, so if a disliked dog walks away while a friend stays,
-  it keeps naming the dog that left. Fixing that means re-posting the content
-  without re-sounding it, and `setOnlyAlertOnce(true)` cannot do it here — it
-  would also silence the arrival that the urgency ordering depends on.
+- ~~**The proximity alert is withdrawn when the last walker leaves the warning
+  distance, but not when one of several leaves.**~~ Closed: `WalkRepository` emits
+  `ProximityEvent.Updated` with the walkers still inside when the set shrinks
+  without a new arrival, and the service rebuilds the notification from that set.
+  The refresh sets `setOnlyAlertOnce(true)`, which is safe because the flag is set
+  only on that path — the arrival post still alerts, and that is what the urgency
+  ordering depends on. It also returns early when the slot is empty, so it cannot
+  bring back an alert the user dismissed with `setAutoCancel(true)`.
 - **Friend groups do not survive a reinstall or a `pm clear`.** They are
   `SharedPreferences` only, with no backup (`allowBackup="false"`). That is the
   price of keeping the social graph off the server, and it is the right trade for
