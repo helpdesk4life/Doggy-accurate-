@@ -20,8 +20,8 @@ Review and merge those like any other PR: the gates below still apply.
 | Android SDK levels | `android/app/build.gradle.kts` (`compileSdk`/`targetSdk` 36, `minSdk` 26), `ci.yml` `packages:` | 36 / 26 | developer.android.com |
 | Gradle wrapper | `android/gradle/wrapper/gradle-wrapper.properties` | 9.9.1 | services.gradle.org |
 | Docker images | `backend/docker-compose.yml`, `backend/Dockerfile` | redis:7-alpine, caddy:2-alpine, python:3.12-slim | Docker Hub |
-| GitHub Actions | `.github/workflows/ci.yml` `uses:` | checkout@v7, setup-python@v7, setup-java@v6, setup-android@v4, setup-gradle@v6, cache@v6, upload-artifact@v7 | GitHub Marketplace; Dependabot already bumps these |
-| Vulnerability scanners | `ci.yml` audit steps, `app/build.gradle.kts` `dependencyCheck` | pip-audit (installed fresh in CI), OWASP dependency-check 13.0.0, `failBuildOnCVSS` 7.0 | PyPI / Gradle plugin portal |
+| GitHub Actions | `.github/workflows/ci.yml` `uses:` | checkout@v7, setup-python@v7, setup-java@v6, setup-android@v4, setup-gradle@v6, upload-artifact@v7 | GitHub Marketplace; Dependabot already bumps these |
+| Vulnerability scanners | `ci.yml` audit steps, `android/app/gradle.lockfile` | pip-audit (installed fresh in CI), OSV-Scanner 2.7.1 | PyPI / GitHub releases |
 
 ## Runbooks
 
@@ -78,6 +78,14 @@ Gates: unit tests + lint 0 errors (CI runs exactly this). If `compileSdk`
 moves, also update `packages: "platforms;android-XX build-tools;XX.0.0"` in
 `ci.yml` in the same PR.
 
+Any dependency change also needs the lockfile regenerated, or the build fails
+with a missing lock state and the vulnerability scan audits the old versions:
+
+```bash
+./gradlew :app:dependencies --write-locks
+git add app/gradle.lockfile
+```
+
 ### Gradle wrapper
 
 ```bash
@@ -115,41 +123,32 @@ audited — including Dependabot's weekly bumps.
   dependencies; `--strict` fails if dependency collection breaks. Reproduce
   locally with `pip install -U pip pip-audit && pip-audit --strict` inside
   the backend venv.
-- Android: the `org.owasp.dependencycheck` Gradle plugin (version catalog
-  entry `owaspDependencyCheck`, applied in `app/build.gradle.kts`) runs as
-  `:app:dependencyCheckAnalyze` in the `android` job. The report lands in
-  `app/build/reports/dependency-check/` and is uploaded with the other
-  Android reports when the job fails.
-- `failBuildOnCVSS` is 7.0: findings at CVSS >= 7 fail CI, softer ones are
-  report-only. A true finding is fixed by bumping the dependency in the same
-  PR (this file's runbooks); a false positive (CPE mis-matches happen on
-  Android) goes into a suppressions file wired up via `suppressionFile` in
-  the `dependencyCheck` block — never silence a whole dependency.
-- The NVD database is cached between runs via `actions/cache` on
-  `~/.dependency-check`.
-- **An `NVD_API_KEY` repo secret is required, not optional.** Request one at
-  <https://nvd.nist.gov/developers/request-an-api-key> (Developers → Request
-  an API Key; the form asks for an organisation name, an email and an
-  organisation type, and the key arrives by mail). NIST answers `403` to
-  non-browser clients, so a `curl` against that URL looks like a dead link —
-  open it in a browser. Without the secret the scan step is skipped rather
-  than failed, so CI stays green but the Android dependency gate is off. With
-  it, the limit is 50 requests per 30s instead of 5.
-- dependency-check 13.0.0 cannot run keyless: it ships `nvd.api.key=` as an
-  empty default in `dependencycheck.properties`, and `NvdApiDataSource` only
-  null-checks it, so the empty string reaches the NVD client and aborts the
-  update with `Invalid API Key, length of 0 too short to provided a masked
-  partial key`. 12.2.2 has no such default and does start the update, but at
-  5 requests per 30s the 425,838-record cold download does not fit the job
-  timeout. Do not "fix" this by downgrading — add the key.
+- Android: OSV-Scanner 2.7.1 scans `android/app/gradle.lockfile` in the
+  `android` job. The lockfile is committed and is the list of packages that
+  get audited; it is written from `debugRuntimeClasspath` and
+  `releaseRuntimeClasspath` only, so build-time tooling (lint, the Hilt/KSP
+  annotation processors, AGP internals) is not scanned. Any known
+  vulnerability fails the job — there is no CVSS threshold.
+- **Regenerate the lockfile after any dependency change**, or the build fails
+  with a missing lock state:
+  `cd android && ./gradlew :app:dependencies --write-locks`.
+- A true finding is fixed by bumping the dependency in the same PR (this
+  file's runbooks). OSV-Scanner has no suppression file; a false positive
+  goes into `android/osv-scanner.toml` as an `[[IgnoredVulns]]` entry with a
+  `reason` and an `effectiveUntil` date — never ignore a whole dependency.
+- OSV-Scanner needs no API key and no database download. The CI step pins
+  v2.7.1 and verifies its SHA-256 before running it.
+- This replaced OWASP dependency-check, which needed an `NVD_API_KEY`, a
+  343 MB NVD database and a cold download that outlasted the job timeout, and
+  which failed the build whenever NVD returned 503. Do not reintroduce it.
 
 ## Universal checklist (every dependency PR)
 
 1. One group per PR; say what moved and why in the PR body.
 2. Local gates green: `pytest -q`, ruff `F,E9`, `scripts/e2e.py`,
    `./gradlew :app:testDebugUnitTest :app:lintDebug` as applicable.
-   The vulnerability scanners (`pip-audit`, `:app:dependencyCheckAnalyze`)
-   run in CI as part of the same gate — see "Vulnerability scanning" above.
+   The vulnerability scanners (`pip-audit`, OSV-Scanner) run in CI as part
+   of the same gate — see "Vulnerability scanning" above.
 3. CI green on the PR: backend, android, e2e jobs.
 4. Deploy to the VPS, then `sudo bash deploy/verify.sh` → 16/16 PASS.
 5. Update this file's "current" column and `HANDOFF.md`'s environment facts.

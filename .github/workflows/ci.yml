@@ -55,12 +55,9 @@ jobs:
   android:
     name: Android tests and lint
     runs-on: ubuntu-latest
-    # 30 because dependency-check's first NVD download (cold cache) is slow.
+    # Cold Gradle cache plus an AGP/KSP compile; the dependency scan itself
+    # takes seconds.
     timeout-minutes: 30
-    # Job-level so the scan step's `if:` can read it: the `secrets` context is
-    # not allowed in a condition, the `env` context is.
-    env:
-      NVD_API_KEY: ${{ secrets.NVD_API_KEY }}
     steps:
       - uses: actions/checkout@v7
 
@@ -78,19 +75,6 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v6
 
-      # dependency-check stores its NVD database under the Gradle user home,
-      # not ~/.dependency-check: DataExtension defaults to
-      # <gradleUserHome>/dependency-check-data/<engine version>. The runners
-      # are ephemeral, so without this the first run of every job re-downloads
-      # the whole database. Keyed per run so every run saves a fresh copy and
-      # the next one restores the newest.
-      - name: Restore dependency-check database
-        uses: actions/cache@v6
-        with:
-          path: ~/.gradle/dependency-check-data
-          key: dependency-check-nvd-${{ github.run_id }}
-          restore-keys: dependency-check-nvd-
-
       # One Gradle invocation so the Kotlin compile is shared between the two
       # tasks. --continue keeps lint running when a test fails, so a red run
       # still reports both rather than hiding the second problem behind the first.
@@ -98,23 +82,24 @@ jobs:
         working-directory: android
         run: ./gradlew :app:testDebugUnitTest :app:lintDebug --continue --console=plain
 
-      # Gate: fails the job on any finding with CVSS >= 7 (see the
-      # dependencyCheck block in app/build.gradle.kts).
+      # Gate: fails on any known vulnerability in the app's runtime
+      # dependencies. OSV-Scanner reads the committed app/gradle.lockfile,
+      # which Gradle writes from debugRuntimeClasspath + releaseRuntimeClasspath
+      # (see the activateDependencyLocking calls in app/build.gradle.kts).
       #
-      # The NVD API key is required, not optional. dependency-check 13.0.0
-      # ships `nvd.api.key=` as an empty default and NvdApiDataSource only
-      # null-checks it, so a missing key reaches the NVD client as "" and
-      # aborts the update with "Invalid API Key, length of 0 too short to
-      # provided a masked partial key". Keyless, the 5-requests-per-30s limit
-      # also makes the 425k-record cold download outlast the job timeout.
-      #
-      # So skip rather than fail when the secret is absent — a fork PR cannot
-      # read it, and a red run there would say nothing about the code. Add the
-      # secret to turn the gate on; UPGRADING.md says how.
-      - name: Scan dependencies (OWASP dependency-check)
-        if: env.NVD_API_KEY != ''
+      # This replaced OWASP dependency-check, which needed an NVD API key, a
+      # 343 MB database and a cold download that outlasted the job timeout, and
+      # which failed the build whenever NVD returned 503. OSV.dev needs no key
+      # and answers in seconds. The binary is pinned and checksum-verified so a
+      # swapped release asset cannot silently run here.
+      - name: Scan dependencies (OSV-Scanner)
         working-directory: android
-        run: ./gradlew :app:dependencyCheckAnalyze --console=plain
+        run: |
+          curl -sSL -o /tmp/osv-scanner \
+            https://github.com/google/osv-scanner/releases/download/v2.7.1/osv-scanner_linux_amd64
+          echo "fb7dab19a8bd9bbe5c3189f09d4b7ee1820c9553a23bac202648a56efd2f6ee8  /tmp/osv-scanner" | sha256sum -c -
+          chmod +x /tmp/osv-scanner
+          /tmp/osv-scanner scan --lockfile=app/gradle.lockfile
 
       - name: Upload reports
         if: failure()
@@ -124,7 +109,6 @@ jobs:
           path: |
             android/app/build/reports/tests/
             android/app/build/reports/lint-results-debug.html
-            android/app/build/reports/dependency-check/
           if-no-files-found: ignore
 
   e2e:
