@@ -522,5 +522,8 @@ banned from auth.log; `deploy/verify.sh` still passes every check.
   Caddy `basic_auth` (user `thomas`) before the app's own login. The password
   was set at deploy time and is not in this repository — regenerate with
   `caddy hash-password`, edit `deploy/Caddyfile`, then step 10 again.
+  (Rotated once already, 2026-11-16 — the deployed hash, the repo's `deploy/Caddyfile`
+  line, `.secrets/bcrypt.txt` and the secrets-file password all move together.
+  Notes in the 2026-11-16 HANDOFF session log.)
 - **No backups.** See step 12.
 - **No monitoring.** If the container dies, nothing tells you.

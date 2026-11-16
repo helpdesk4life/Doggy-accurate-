@@ -30,7 +30,7 @@ backend.thomasfeyens.be {
 	# Second gate on the admin panel, before the app's own login. The hash is
 	# bcrypt (caddy hash-password); rotate it there and reload.
 	basic_auth /admin* {
-		thomas $2a$14$9rrrA34XuNISYpTAI2Z1M.fx08c/F5SOKjLwDibkQfMNjRaN01yVq
+		thomas $2a$14$q2k6gfaOh4kOqUtU8EBd7eXFh5vyDTdTuLeS8fHLvwU7eIJo56/Ce
 	}
 
 	reverse_proxy 127.0.0.1:8000 {

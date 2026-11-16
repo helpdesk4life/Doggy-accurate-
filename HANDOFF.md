@@ -62,21 +62,30 @@ owned by `thomas`.
 
 ### Discovered: the secrets file is stale
 
-- **`ADMIN_PANEL_PASSWORD` is fixed** — rotated the same day and recorded, see the
-  next section. **`CADDY_BASIC_AUTH_PASSWORD` is still the one stale entry**: the
-  deploy-time Caddy `basic_auth` password does not match the local record, proven
-  by a bodyless 401 from Caddy (the request never reached FastAPI). It only guards
-  the browser path — `/admin*` over HTTPS — which is why the panel could not be
-  driven programmatically here; the box's loopback reaches the app directly and
-  was used instead. `deploy/VPS.md` says the password was set at deploy time and
-  is not in the repository; rotating it is `caddy hash-password` plus the
-  `deploy/Caddyfile` hash plus a reload, then update the secrets file.
-- The `SMTP_*` set, including the Gmail app password, is recorded in
-  `.secrets/dogwalk-secrets.env` alongside the rest. With the admin password
-  rotated (below) and the JWT synced, `CADDY_BASIC_AUTH_PASSWORD` is the only
-  entry in the file that does not match the deployment — except `THOMAS_USER_PASSWORD`,
-  which matches no known account (the only walker on the box is the emulator
-  test account) and may belong to an account that no longer exists.
+- Every entry in the file is now reconciled. The `SMTP_*` set, including the
+  Gmail app password, is recorded in `.secrets/dogwalk-secrets.env` (see above).
+  `JWT_SECRET` and `ADMIN_PANEL_PASSWORD` were rotated the same day they leaked
+  (next section), and `CADDY_BASIC_AUTH_PASSWORD` — the one entry that never
+  matched the deployment — was rotated and re-recorded the same day.
+- **`CADDY_BASIC_AUTH_PASSWORD` was rotated the same day.** The admin gate turned
+  out to run on the *host's* systemd Caddy (`/etc/caddy/Caddyfile`), not the
+  compose container — the `backend/Caddyfile` mounted into `backend-caddy-1` has
+  no gate at all, which is why the container's config had no `basic_auth` line
+  and the deployed hash hunt kept coming up empty. A fresh password was generated
+  locally (never printed), hashed on the box with `caddy hash-password` fed over
+  SSH stdin (bcrypt cost 14), swapped into `/etc/caddy/Caddyfile` (backup
+  `Caddyfile.bak-auth-20261116` beside it), run through `caddy validate`, then
+  applied with `systemctl reload caddy`. Verified over the public internet: no
+  or wrong credentials → 401 from Caddy itself
+  (`WWW-Authenticate: Basic realm="restricted"`); the new password → Caddy
+  passes and FastAPI answers its own 303 to the login route. The local
+  `.secrets/dogwalk-secrets.env` records the new value — sync proven by matching
+  SHA-256 fingerprints, never by printing — `.secrets/bcrypt.txt` follows the
+  new hash, and the repo's `deploy/Caddyfile` hash line was updated to match the
+  deployment and committed.
+- **`THOMAS_USER_PASSWORD` is the one remaining oddity**: it matches no known
+  account (the only walker on the box is the emulator test account) and may
+  belong to an account that no longer exists.
 
 ### Two secrets appeared in this session's transcript
 
