@@ -12,8 +12,74 @@ pagina en account creation`, on top of `7d26413 Eerste versie`; see **What
 landed in `e5ed2ad`** at the bottom for what that commit contains.
 
 **One PR is open: #13 on `vibe/vuln-scanners-056e99`** — the
-dependency-vulnerability scanners. It is not merged and not finished. Read
-**Session log — 2026-11-15 (evening)** first.
+dependency-vulnerability scanners. It is finished, CI is 3/3 green and it is
+ready for review; **not merged**. Read **Session log — 2026-11-16** first.
+
+## Session log — 2026-11-16 — PR #13 finished: OSV-Scanner replaces dependency-check
+
+Branch `vibe/vuln-scanners-056e99`, HEAD `7a4ccc4`, pushed to both `github`
+and `origin`. PR #13 is ready for review, `mergeable_state: clean`, CI 3/3
+green on run `43824637127`. **Not merged** — `main` is still `d2f5018`.
+
+### What changed
+
+The 2026-11-15 evening session left two open problems: NVD was returning 503,
+and dependency-check scanned the buildscript classpath instead of the app's
+dependencies. Both were reproduced, and the second one is fatal to the
+approach:
+
+- `scanConfigurations.set(listOf("debugRuntimeClasspath"))` does fix the
+  classpath — the log then says `Analyzing app:debugRuntimeClasspath` and the
+  `commons-lang3` `IllegalAccessError` disappears (commons-lang3 is not in the
+  app's runtime classpath).
+- But dependency-check 13 treats an NVD update failure as fatal:
+  `ExceptionCollection: UpdateException: Error updating the NVD Data`. NVD
+  answered 503 to roughly one request in three, and the client exhausted all
+  31 retries. The cold database is 343 MB. A gate that fails when NVD is
+  having a bad day says nothing about the code.
+
+So dependency-check is gone. OSV-Scanner 2.7.1 reads a Gradle lockfile, needs
+no key and no database, and answers in seconds.
+
+| Commit | What |
+| --- | --- |
+| `7a4ccc4` | dependency-check removed from the catalog and the app module; `debugRuntimeClasspath` + `releaseRuntimeClasspath` locked; `app/gradle.lockfile` committed; CI runs OSV-Scanner 2.7.1 (pinned, SHA-256 verified); `UPGRADING.md` rewritten. |
+
+### Why the lockfile is narrow
+
+`lockAllConfigurations()` produced 274 entries and 7 findings — all of them
+from `androidLintTool`, `hiltAnnotationProcessor*`, `ksp*ProcessorClasspath`
+and `_agp_internal_*kspClasspath`: guava, commons-lang3, httpclient,
+bouncycastle. None of those ship in the APK. Locking only the two runtime
+classpaths gives 136 entries and no findings, and the scan now covers
+maplibre, okhttp, play-services-location, coroutines and Hilt.
+
+`configurations.named("debugRuntimeClasspath")` fails at script evaluation
+("Configuration with name ... not found") because AGP creates the
+configuration later; `configurations.configureEach { ... }` is the working
+form.
+
+### Verification
+
+- `./gradlew :app:testDebugUnitTest :app:lintDebug` → 48 tests, 0 failures,
+  lint 0 errors.
+- `osv-scanner scan --lockfile=app/gradle.lockfile` → 135 packages,
+  "No issues found", exit 0. Adding `commons-lang3:3.16.0` to a copy makes it
+  exit 1, so the gate does fail when it should.
+- `pytest -q` → 207 passed; `pip-audit --strict` → no known vulnerabilities.
+- `actionlint` 1.7.12 clean on `ci.yml`.
+- CI run `43824637127`: backend, android and e2e all success.
+
+### Environment facts added
+
+- OSV-Scanner 2.7.1 Windows binary is at `/tmp/osv/osv-scanner.exe` for this
+  session; the Linux asset's SHA-256 is
+  `fb7dab19a8bd9bbe5c3189f09d4b7ee1820c9553a23bac202648a56efd2f6ee8`.
+- `./gradlew :app:dependencies --write-locks` also writes
+  `android/settings-gradle.lockfile` (version-catalog resolution only). It is
+  gitignored; only `android/app/gradle.lockfile` is committed.
+- The NVD key in `.secrets/dogwalk-secrets.env` is no longer read by CI. It
+  can stay for a manual dependency-check run, but nothing uses it.
 
 ## Session log — 2026-11-15 (evening) — PR #13, vulnerability scanners
 
@@ -1081,9 +1147,15 @@ run means what a green local run means.
 
 | Job | Runs | Needs |
 | --- | --- | --- |
-| `backend` | `pytest -q` on Python 3.12 | Nothing — the tests inject fakeredis |
-| `android` | `:app:testDebugUnitTest :app:lintDebug` on JDK 17 | Android SDK 36, installed by the job |
+| `backend` | `pytest -q` on Python 3.12, then `pip-audit --strict` | Nothing — the tests inject fakeredis |
+| `android` | `:app:testDebugUnitTest :app:lintDebug` on JDK 17, then `osv-scanner scan --lockfile=app/gradle.lockfile` | Android SDK 36, installed by the job |
 | `e2e` | `scripts/e2e.py` | `docker compose up -d --build`, then a health poll |
+
+The two vulnerability scanners are gates. `pip-audit` audits the environment
+pytest just installed; OSV-Scanner audits the committed
+`android/app/gradle.lockfile`, which is written from `debugRuntimeClasspath`
+and `releaseRuntimeClasspath` only. Neither needs a secret. See
+`UPGRADING.md`, "Vulnerability scanning".
 
 Python 3.12 is deliberate: it is what `backend/Dockerfile` ships, so CI tests the
 interpreter that runs in production rather than the 3.14 on this machine.
@@ -1263,6 +1335,11 @@ next person meets it as a passing test rather than a mystery failure.
   AGP 9 has built-in Kotlin support: `org.jetbrains.kotlin.android` is removed
   from the build files (it fails to apply under AGP 9); the Compose and
   serialization plugins stay.
+- **The Android vulnerability gate reads `android/app/gradle.lockfile`**, not
+  the buildscript classpath. Regenerate it with
+  `./gradlew :app:dependencies --write-locks` after any dependency change;
+  `--write-locks` also drops a `settings-gradle.lockfile` next to it, which is
+  gitignored. OSV-Scanner 2.7.1 is pinned in `ci.yml` with its SHA-256.
 - Backend venv: `backend/.venv/Scripts/python.exe`
 - `ruff` is installed in that venv for linting only, and is deliberately **not**
   in `requirements.txt`. Run it as

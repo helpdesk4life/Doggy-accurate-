@@ -3,7 +3,7 @@
 What to build next, in priority order. `HANDOFF.md` covers how to get the stack
 running and what is already verified; this file is the forward-looking half.
 
-Last updated 2026-11-15 (see **Session log — 2026-11-15** in `HANDOFF.md`).
+Last updated 2026-11-16 (see **Session log — 2026-11-16** in `HANDOFF.md`).
 
 ## Start here tomorrow
 
@@ -32,6 +32,10 @@ on top of the pip floor bumps (#2–#6), walk history (`c9313d1`), and the earli
 SMTP work (`e624390`, `15ddb85`) and admin panel (`e5ed2ad`). See **Session log —
 2026-11-15** in `HANDOFF.md` for the full list, **What landed in `e5ed2ad`** for
 the panel, and **Blocking** for the block store.
+
+**PR #13 is open and ready** on `vibe/vuln-scanners-056e99` (`7a4ccc4`): the
+dependency-vulnerability scanners. CI is 3/3 green; merging it is the next
+step. `main` stays at `d2f5018` until then.
 
 The app is signed in as `fresh@example.com` / `hunter2hunter2` with dog `Pickle`.
 `emma@example.com` also uses `hunter2hunter2`. `buddy@example.com` was created by
