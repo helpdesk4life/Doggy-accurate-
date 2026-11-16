@@ -30,9 +30,10 @@ cd /c/Users/thoma/Downloads/dog/backend
 **The tree is clean**, HEAD being the PR #13 squash merge `0906161` plus docs
 follow-ups — the dependency-vulnerability scanners (pip-audit + OSV-Scanner),
 on top of the pip floor bumps (#2–#6), walk history (`c9313d1`), and the
-earlier SMTP work (`e624390`, `15ddb85`) and admin panel (`e5ed2ad`). No open
-PRs. See **Session log — 2026-11-16** in `HANDOFF.md` for the full list, **What
-landed in `e5ed2ad`** for the panel, and **Blocking** for the block store.
+earlier SMTP work (`e624390`, `15ddb85`) and admin panel (`e5ed2ad`). PR #14 is
+open on `fix/proximity-alert-refresh`. See **Session log — 2026-11-16** in
+`HANDOFF.md` for the full list, **What landed in `e5ed2ad`** for the panel, and
+**Blocking** for the block store.
 
 The app is signed in as `fresh@example.com` / `hunter2hunter2` with dog `Pickle`.
 `emma@example.com` also uses `hunter2hunter2`. `buddy@example.com` was created by
@@ -279,7 +280,7 @@ deploy mid-evening annoys someone.
 
 ## P2 — quality, before or shortly after launch
 
-- **Android tests cover five areas.** 48 tests: `WalkSocketClient`,
+- **Android tests cover five areas.** 50 tests: `WalkSocketClient`,
   `WalkRepository`, `AuthStore`, `HttpBase`, and now the walk history
   (`WalkStatsRecorder`, `WalkHistoryStore`). `WalkRepository` was the valuable
   one and is done — it runs on its seams (`WalkSettings`, `WalkTransport`,
@@ -295,12 +296,13 @@ deploy mid-evening annoys someone.
 - **Reconnect backoff is untested.** The client backs off 1 s → 30 s, but nobody
   has run it against a backend that stays down for minutes. Worth a manual pass
   and then a test.
-- **The proximity alert goes stale when one of several walkers leaves.** It is
-  withdrawn correctly once the last one is outside the warning distance, but if a
-  disliked dog walks away while a friend stays, the notification keeps naming the
-  dog that left. Re-posting the content without re-sounding it needs a path that
-  `setOnlyAlertOnce(true)` cannot provide, because that would also silence the
-  arrival the urgency ordering depends on.
+- ~~**The proximity alert goes stale when one of several walkers leaves.**~~
+  Closed: `WalkRepository` emits `ProximityEvent.Updated` with the walkers still
+  inside when the set shrinks without a new arrival, and the service rebuilds the
+  notification from that set. The refresh sets `setOnlyAlertOnce(true)`, which is
+  safe because the flag is set only on that path — the arrival post still alerts,
+  and that is what the urgency ordering depends on. It also returns early when the
+  slot is empty, so it cannot bring back an alert the user dismissed.
 - **Battery.** `PRIORITY_HIGH_ACCURACY` every 5 s for the length of a walk is
   heavy. Consider `BALANCED` when the walker is stationary, or a longer interval
   once the first fix lands.
@@ -384,7 +386,7 @@ CA, blocking was recorded as not existing, the admin panel was recorded as havin
 no second gate, and four test counts were stale. The second pass followed the
 security review and added the blocks API to `README.md`, which had never
 documented it, plus the two email test files. Current gate: 207 backend tests,
-56/56 e2e, 33 Android tests, 0 lint errors, 16/16 on the VPS.
+56/56 e2e, 50 Android tests, 0 lint errors, 16/16 on the VPS.
 
 **Walk history and stats landed** (P3): distance, duration and dogs met, all
 derived client-side from what the app already receives — the first feature that

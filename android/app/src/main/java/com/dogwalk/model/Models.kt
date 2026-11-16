@@ -35,6 +35,15 @@ sealed interface ProximityEvent {
     /** Walkers that just came inside the warning distance. */
     data class Arrived(val walkers: List<NearbyWalker>) : ProximityEvent
 
+    /**
+     * The set changed without a new arrival: someone left while others stayed.
+     *
+     * The alert still applies, but it names the walker that left, so its text has
+     * to be rebuilt from [walkers] — the ones still inside. Separate from
+     * [Arrived] because this one must not sound: the arrival already did.
+     */
+    data class Updated(val walkers: List<NearbyWalker>) : ProximityEvent
+
     /** The last walker inside the warning distance left, so the alert is stale. */
     data object Cleared : ProximityEvent
 }

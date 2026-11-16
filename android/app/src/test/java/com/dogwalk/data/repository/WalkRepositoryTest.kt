@@ -251,6 +251,62 @@ class WalkRepositoryTest {
     }
 
     @Test
+    fun `one of several walkers leaving refreshes the alert instead of withdrawing it`() = runTest {
+        session { scope ->
+            val transport = FakeTransport(scope)
+            val repository = repository(
+                scope,
+                transport,
+                signedInStore(),
+                FakeRefresher(),
+                settings = FakeSettings(warningDistanceMeters = 100),
+            )
+            startTracking(repository)
+
+            repository.proximityEvents.test {
+                transport.receive(alertFrame(walker("buddy", 80.0), walker("rex", 60.0)))
+                assertEquals(
+                    ProximityEvent.Arrived(listOf(nearby("buddy", 80.0), nearby("rex", 60.0))),
+                    awaitItem(),
+                )
+
+                // Buddy wandered off. Rex is still inside, so the alert stands —
+                // but it must stop naming the dog that left.
+                transport.receive(alertFrame(walker("rex", 60.0)))
+
+                assertEquals(ProximityEvent.Updated(listOf(nearby("rex", 60.0))), awaitItem())
+            }
+        }
+    }
+
+    @Test
+    fun `a walker leaving while another arrives alerts on the arrival and does not also refresh`() = runTest {
+        session { scope ->
+            val transport = FakeTransport(scope)
+            val repository = repository(
+                scope,
+                transport,
+                signedInStore(),
+                FakeRefresher(),
+                settings = FakeSettings(warningDistanceMeters = 100),
+            )
+            startTracking(repository)
+
+            repository.proximityEvents.test {
+                transport.receive(alertFrame(walker("buddy", 80.0)))
+                assertEquals(ProximityEvent.Arrived(listOf(nearby("buddy", 80.0))), awaitItem())
+
+                // One frame, both changes. The arrival already carries the new
+                // text, so a refresh on top of it would only be a second post.
+                transport.receive(alertFrame(walker("rex", 60.0)))
+
+                assertEquals(ProximityEvent.Arrived(listOf(nearby("rex", 60.0))), awaitItem())
+                expectNoEvents()
+            }
+        }
+    }
+
+    @Test
     fun `a proximity clear frame empties the map and withdraws the alert`() = runTest {
         session { scope ->
             val transport = FakeTransport(scope)
