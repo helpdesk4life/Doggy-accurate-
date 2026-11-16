@@ -126,14 +126,24 @@ class NotificationHelper @Inject constructor(
      * matters more than a friend. Otherwise a friend arriving would replace the
      * warning with a chime, which is the wrong way round.
      *
+     * [silent] rebuilds the text of an alert that is already showing, for when
+     * someone leaves while others stay. It must not sound — the arrival already
+     * did — and it must not bring back an alert the user dismissed, which is why
+     * it returns early when the slot is empty.
+     *
      * The POST_NOTIFICATIONS check is [canPostNotifications] below. Lint's
      * dataflow does not cross a private method, so the suppression is for the
      * analyser rather than for a missing guard.
      */
     @SuppressLint("MissingPermission")
-    fun notifyProximity(walkers: List<NearbyWalker>, marked: Map<String, MarkedDog>) {
+    fun notifyProximity(
+        walkers: List<NearbyWalker>,
+        marked: Map<String, MarkedDog>,
+        silent: Boolean = false,
+    ) {
         if (walkers.isEmpty()) return
         if (!canPostNotifications()) return
+        if (silent && !isProximityShowing()) return
 
         val relationship = walkers
             .groupBy { marked[it.id]?.relationship ?: DogRelationship.UNKNOWN }
@@ -165,10 +175,23 @@ class NotificationHelper @Inject constructor(
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_SOCIAL)
+            // Only ever set on the refresh path. The arrival post has to alert,
+            // and that is what the urgency ordering above is for.
+            .setOnlyAlertOnce(silent)
             .build()
 
         runCatching { manager.notify(PROXIMITY_NOTIFICATION_ID, notification) }
     }
+
+    /**
+     * Whether the alert is still in the shade.
+     *
+     * [notifyProximity] sets `setAutoCancel(true)`, so a tap is an acknowledgement.
+     * A silent refresh must not undo it by re-posting an alert the user dismissed.
+     */
+    private fun isProximityShowing(): Boolean = runCatching {
+        manager.activeNotifications.any { it.id == PROXIMITY_NOTIFICATION_ID }
+    }.getOrDefault(false)
 
     /**
      * Withdraw the proximity alert.

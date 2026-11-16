@@ -55,8 +55,9 @@ class WalkRepository @Inject constructor(
     val radiusMeters: StateFlow<Double> = _radiusMeters.asStateFlow()
 
     /**
-     * Emits when walkers arrive inside the warning distance, and when the last one
-     * leaves so the service can withdraw the alert it posted.
+     * Emits when walkers arrive inside the warning distance, when the set changes
+     * without a new arrival so the service can rebuild the alert's text, and when
+     * the last one leaves so it can withdraw the alert it posted.
      */
     private val _proximityEvents = MutableSharedFlow<ProximityEvent>(extraBufferCapacity = 16)
     val proximityEvents: SharedFlow<ProximityEvent> = _proximityEvents.asSharedFlow()
@@ -195,6 +196,11 @@ class WalkRepository @Inject constructor(
                         // The last one left. Withdraw the alert rather than leave it
                         // in the shade claiming a dog is nearby when it is not.
                         emptied -> _proximityEvents.tryEmit(ProximityEvent.Cleared)
+
+                        // Someone left while others stayed. The alert still applies,
+                        // but it names the walker that left, so its text has to be
+                        // rebuilt from the ones still inside — without sounding again.
+                        else -> _proximityEvents.tryEmit(ProximityEvent.Updated(withinWarning))
                     }
                 }
             }

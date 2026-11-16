@@ -157,6 +157,15 @@ class LocationTrackingService : LifecycleService() {
                         // dog marked mid-walk changes the sound on the very next alert.
                         notifications.notifyProximity(event.walkers, settings.markedDogs.value)
 
+                    // Someone left while others stayed. The alert still applies but
+                    // its text is stale, so rebuild it in place without sounding.
+                    is ProximityEvent.Updated ->
+                        notifications.notifyProximity(
+                            event.walkers,
+                            settings.markedDogs.value,
+                            silent = true,
+                        )
+
                     ProximityEvent.Cleared -> notifications.cancelProximity()
                 }
             }
