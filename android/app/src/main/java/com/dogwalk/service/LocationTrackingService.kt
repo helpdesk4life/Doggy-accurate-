@@ -152,19 +152,10 @@ class LocationTrackingService : LifecycleService() {
         alertJob = lifecycleScope.launch {
             repository.proximityEvents.collect { event ->
                 when (event) {
-                    is ProximityEvent.Arrived ->
-                        // Read the marks at alert time rather than caching them, so a
-                        // dog marked mid-walk changes the sound on the very next alert.
+                    // Read the marks at post time rather than caching them, so a
+                    // dog marked mid-walk changes the sound on the very next post.
+                    is ProximityEvent.Changed ->
                         notifications.notifyProximity(event.walkers, settings.markedDogs.value)
-
-                    // Someone left while others stayed. The alert still applies but
-                    // its text is stale, so rebuild it in place without sounding.
-                    is ProximityEvent.Updated ->
-                        notifications.notifyProximity(
-                            event.walkers,
-                            settings.markedDogs.value,
-                            silent = true,
-                        )
 
                     ProximityEvent.Cleared -> notifications.cancelProximity()
                 }

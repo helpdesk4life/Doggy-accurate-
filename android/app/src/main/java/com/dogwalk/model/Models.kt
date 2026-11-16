@@ -27,24 +27,22 @@ data class NearbyWalker(
 /**
  * What just happened to the set of walkers inside the warning distance.
  *
- * One flow rather than an arrival flow plus a separate clear flow: the alert
- * occupies a single notification slot, so a withdrawal that overtook the arrival
+ * One flow rather than a change flow plus a separate clear flow: the alert
+ * occupies a single notification slot, so a withdrawal that overtook the change
  * replacing it would silently swallow a real alert.
  */
 sealed interface ProximityEvent {
-    /** Walkers that just came inside the warning distance. */
-    data class Arrived(val walkers: List<NearbyWalker>) : ProximityEvent
-
     /**
-     * The set changed without a new arrival: someone left while others stayed.
+     * The set inside the warning distance changed and is no longer empty.
      *
-     * The alert still applies, but it names the walker that left, so its text has
-     * to be rebuilt from [walkers] — the ones still inside. Separate from
-     * [Arrived] because this one must not sound: the arrival already did.
+     * Carries everyone inside, not just the ones that just arrived: the alert
+     * names the most urgent walker *present*, so it has to be rebuilt from the
+     * whole set. Whether that rebuild is worth a sound is decided from what the
+     * user was last told about, not from the event type.
      */
-    data class Updated(val walkers: List<NearbyWalker>) : ProximityEvent
+    data class Changed(val walkers: List<NearbyWalker>) : ProximityEvent
 
-    /** The last walker inside the warning distance left, so the alert is stale. */
+    /** Nobody is inside the warning distance any more, so the alert is stale. */
     data object Cleared : ProximityEvent
 }
 
