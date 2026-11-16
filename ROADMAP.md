@@ -297,12 +297,14 @@ deploy mid-evening annoys someone.
   has run it against a backend that stays down for minutes. Worth a manual pass
   and then a test.
 - ~~**The proximity alert goes stale when one of several walkers leaves.**~~
-  Closed: `WalkRepository` emits `ProximityEvent.Updated` with the walkers still
-  inside when the set shrinks without a new arrival, and the service rebuilds the
-  notification from that set. The refresh sets `setOnlyAlertOnce(true)`, which is
-  safe because the flag is set only on that path — the arrival post still alerts,
-  and that is what the urgency ordering depends on. It also returns early when the
-  slot is empty, so it cannot bring back an alert the user dismissed.
+  Closed: the alert is rebuilt from the whole set inside the warning distance on
+  every change, not just arrivals. One `ProximityEvent.Changed` carries everyone
+  still inside, the text names the most urgent walker present, and
+  `ProximityAlertPolicy` owns the sound — re-sound only when the most urgent
+  walker present is more urgent than the one the user was last told about. That
+  is also what stops a friend arriving next to a warning from replacing it with a
+  chime. A quiet rebuild returns early when the slot is empty, so it cannot bring
+  back an alert the user dismissed.
 - **Battery.** `PRIORITY_HIGH_ACCURACY` every 5 s for the length of a walk is
   heavy. Consider `BALANCED` when the walker is stationary, or a longer interval
   once the first fix lands.
