@@ -13,10 +13,84 @@ landed earlier as `e5ed2ad admin pagina en account creation`, on top of
 `7d26413 Eerste versie`; see **What landed in `e5ed2ad`** at the bottom for
 what that commit contains.
 
-**One open PR.** PR #14 (`fix/proximity-alert-refresh`) fixes the proximity alert
-that kept naming a dog that had left. PR #13 (the dependency-vulnerability
-scanners) merged as `0906161`, with docs follow-ups on top. Read **Session log —
-2026-11-16** first.
+**Three open PRs, in merge order.** PR #14 (`fix/proximity-alert-refresh`) stops
+the proximity alert keeping a walker that left; PR #16 (`fix/proximity-urgency`) is
+stacked on it and makes the urgency ordering rank who is *present* rather than who
+just arrived, so it supersedes #14's `silent` parameter — merge #14 first, then
+rebase #16. PR #15 (`perf/stationary-cadence`) is the independent one, but it also
+touches these two files, so it rebases after whichever lands second. PR #13 (the
+dependency-vulnerability scanners) merged as `0906161`, with docs follow-ups on
+top. Read **Session log — 2026-11-16** first.
+
+## Session log — 2026-11-16 — the urgency ordering ranks who is present, not who arrived
+
+Branch `fix/proximity-urgency`, HEAD `b0c2513`, pushed to both `github` and
+`origin`, PR #16, stacked on PR #14.
+
+### The bug
+
+`NotificationHelper` documents its own intent: "a dog yours does not like
+matters more than one it does... otherwise a friend arriving would replace the
+warning with a chime, which is the wrong way round." That is exactly what
+happened, and it is not a big bug to find:
+
+- a disliked dog is 80 m away, the warning is showing, the alarm has sounded;
+- a friend arrives;
+- the warning is replaced by `Friend nearby` on the friend channel, with a chime.
+
+`WalkRepository` emitted `Arrived` carrying only the walkers that just came in, so
+`notifyProximity` ranked urgency across the arrivals alone. The ordering the helper
+describes could only ever fire when walkers arrived in the same frame.
+
+### The fix
+
+The alert has two jobs and they are not the same job. The text says who is
+nearby, so it is now built from everyone inside the warning distance and always
+names the most urgent walker present. The sound says something changed, and
+`ProximityAlertPolicy` owns that call — pure, in its own file, testable on the JVM:
+
+> Sound when the most urgent walker present is more urgent than the one the user
+> was last told about, or when nothing is.
+
+That rule is airtight in both directions. If the most urgent walker present is now
+more urgent than at the last post, then a walker of that relationship must have
+arrived — otherwise the last post would already have been about them. And if a
+less urgent walker arrives or leaves, the text changes but nothing sounds.
+
+With the sound decided from what was last shown, #14's `silent` parameter is
+subsumed: a refresh and an arrival are the same decision now. `Arrived` and
+`Updated` therefore collapse into one `Changed` event carrying the whole set, which
+is one rule where there were two mechanisms.
+
+Two behaviours pinned deliberately, because they were verified on the emulator
+before and must not regress:
+
+- `cancelProximity()` forgets what was last shown, so a walker who leaves and
+  comes back still alerts — re-entry is still news.
+- A quiet rebuild returns early when the slot is empty, so it cannot bring back
+  an alert the user tapped away.
+
+### Two behaviour changes worth knowing
+
+A second dog of the same standing no longer re-sounds: a second friend arriving
+next to a friend is not more urgent news. And a friend arriving next to a
+disliked-dog warning is silent. Both follow from the one rule — the alert tells
+you about something worse than you already knew.
+
+### Verification
+
+- `./gradlew :app:testDebugUnitTest :app:lintDebug` → 58 tests, 0 failures, lint
+  0 errors and no new warnings (39, all pre-existing).
+- Seven tests on the policy: nothing showing always sounds, friend next to warning
+  is silent, disliked next to friend sounds, stranger next to friend sounds, friend
+  next to stranger is silent, a second disliked does not replay the alarm, and the
+  refresh after the most urgent leaves is silent.
+- One on the repository: a walker arriving while another is inside is carried with
+  everyone else. The earlier `Updated` assertion became `Changed` carrying `rex`
+  alone, because the event no longer knows or cares whether someone arrived.
+- **Still not verified on a device.** The posting side needs the shade; the same
+  manual pass as before covers it — hold one walker inside, bring in a second,
+  confirm the alert keeps naming the more urgent one.
 
 ## Session log — 2026-11-16 — the proximity alert stops naming a dog that left
 
@@ -1316,13 +1390,18 @@ next person meets it as a passing test rather than a mystery failure.
 - No reconnect backoff tuning — the client reconnects, but the retry cadence has
   not been stress-tested against a backend that stays down.
 - ~~**The proximity alert is withdrawn when the last walker leaves the warning
-  distance, but not when one of several leaves.**~~ Closed: `WalkRepository` emits
-  `ProximityEvent.Updated` with the walkers still inside when the set shrinks
-  without a new arrival, and the service rebuilds the notification from that set.
-  The refresh sets `setOnlyAlertOnce(true)`, which is safe because the flag is set
-  only on that path — the arrival post still alerts, and that is what the urgency
-  ordering depends on. It also returns early when the slot is empty, so it cannot
-  bring back an alert the user dismissed with `setAutoCancel(true)`.
+  distance, but not when one of several leaves.**~~ Closed, in two steps. The
+  alert is now rebuilt from the whole set inside the warning distance on every
+  change, so it can never keep naming a walker that left: one
+  `ProximityEvent.Changed` carries everyone still inside, and the text names the
+  most urgent walker present, not the ones that just arrived. The sound is a
+  separate decision that `ProximityAlertPolicy` owns — re-sound only when the
+  most urgent walker present is more urgent than the one the user was last told
+  about — which is also what stops a friend arriving next to a warning from
+  replacing it with a chime, and a second dog of the same standing from replaying
+  its alarm. A quiet rebuild returns early when the slot is empty, so it cannot
+  bring back an alert the user dismissed with `setAutoCancel(true)`. See
+  **Session log — 2026-11-16** for how the two changes fit together.
 - **Friend groups do not survive a reinstall or a `pm clear`.** They are
   `SharedPreferences` only, with no backup (`allowBackup="false"`). That is the
   price of keeping the social graph off the server, and it is the right trade for

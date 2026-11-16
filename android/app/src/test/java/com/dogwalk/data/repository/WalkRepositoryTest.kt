@@ -190,7 +190,7 @@ class WalkRepositoryTest {
             repository.proximityEvents.test {
                 transport.receive(alertFrame(walker("buddy", 80.0), walker("rex", 300.0)))
 
-                assertEquals(ProximityEvent.Arrived(listOf(nearby("buddy", 80.0))), awaitItem())
+                assertEquals(ProximityEvent.Changed(listOf(nearby("buddy", 80.0))), awaitItem())
                 assertEquals(
                     listOf("buddy", "rex"),
                     repository.nearby.value.map { it.id },
@@ -214,7 +214,7 @@ class WalkRepositoryTest {
 
             repository.proximityEvents.test {
                 transport.receive(alertFrame(walker("buddy", 80.0)))
-                assertEquals(ProximityEvent.Arrived(listOf(nearby("buddy", 80.0))), awaitItem())
+                assertEquals(ProximityEvent.Changed(listOf(nearby("buddy", 80.0))), awaitItem())
 
                 transport.receive(alertFrame(walker("buddy", 90.0)))
                 transport.receive(alertFrame(walker("buddy", 80.0), walker("rex", 300.0)))
@@ -239,7 +239,7 @@ class WalkRepositoryTest {
 
             repository.proximityEvents.test {
                 transport.receive(alertFrame(walker("buddy", 80.0), walker("rex", 300.0)))
-                assertEquals(ProximityEvent.Arrived(listOf(nearby("buddy", 80.0))), awaitItem())
+                assertEquals(ProximityEvent.Changed(listOf(nearby("buddy", 80.0))), awaitItem())
 
                 // Buddy wandered off. Rex is still on the map, but the alert is stale.
                 transport.receive(alertFrame(walker("rex", 300.0)))
@@ -266,7 +266,7 @@ class WalkRepositoryTest {
             repository.proximityEvents.test {
                 transport.receive(alertFrame(walker("buddy", 80.0), walker("rex", 60.0)))
                 assertEquals(
-                    ProximityEvent.Arrived(listOf(nearby("buddy", 80.0), nearby("rex", 60.0))),
+                    ProximityEvent.Changed(listOf(nearby("buddy", 80.0), nearby("rex", 60.0))),
                     awaitItem(),
                 )
 
@@ -274,13 +274,13 @@ class WalkRepositoryTest {
                 // but it must stop naming the dog that left.
                 transport.receive(alertFrame(walker("rex", 60.0)))
 
-                assertEquals(ProximityEvent.Updated(listOf(nearby("rex", 60.0))), awaitItem())
+                assertEquals(ProximityEvent.Changed(listOf(nearby("rex", 60.0))), awaitItem())
             }
         }
     }
 
     @Test
-    fun `a walker leaving while another arrives alerts on the arrival and does not also refresh`() = runTest {
+    fun `a walker arriving while another is inside is carried with everyone else`() = runTest {
         session { scope ->
             val transport = FakeTransport(scope)
             val repository = repository(
@@ -294,13 +294,44 @@ class WalkRepositoryTest {
 
             repository.proximityEvents.test {
                 transport.receive(alertFrame(walker("buddy", 80.0)))
-                assertEquals(ProximityEvent.Arrived(listOf(nearby("buddy", 80.0))), awaitItem())
+                assertEquals(ProximityEvent.Changed(listOf(nearby("buddy", 80.0))), awaitItem())
 
-                // One frame, both changes. The arrival already carries the new
-                // text, so a refresh on top of it would only be a second post.
+                // The alert names the most urgent walker present, so it has to be
+                // told about everyone inside, not only the one that just arrived.
+                transport.receive(alertFrame(walker("buddy", 80.0), walker("rex", 60.0)))
+
+                assertEquals(
+                    ProximityEvent.Changed(listOf(nearby("buddy", 80.0), nearby("rex", 60.0))),
+                    awaitItem(),
+                )
+                expectNoEvents()
+            }
+        }
+    }
+
+    @Test
+    fun `a walker leaving while another arrives emits one change carrying the new set`() = runTest {
+        session { scope ->
+            val transport = FakeTransport(scope)
+            val repository = repository(
+                scope,
+                transport,
+                signedInStore(),
+                FakeRefresher(),
+                settings = FakeSettings(warningDistanceMeters = 100),
+            )
+            startTracking(repository)
+
+            repository.proximityEvents.test {
+                transport.receive(alertFrame(walker("buddy", 80.0)))
+                assertEquals(ProximityEvent.Changed(listOf(nearby("buddy", 80.0))), awaitItem())
+
+                // One frame, both changes: Buddy out, Rex in. One event, because
+                // arrival and withdrawal are the same rebuild from the helper's
+                // point of view — it just decides whether to sound.
                 transport.receive(alertFrame(walker("rex", 60.0)))
 
-                assertEquals(ProximityEvent.Arrived(listOf(nearby("rex", 60.0))), awaitItem())
+                assertEquals(ProximityEvent.Changed(listOf(nearby("rex", 60.0))), awaitItem())
                 expectNoEvents()
             }
         }
@@ -321,7 +352,7 @@ class WalkRepositoryTest {
 
             repository.proximityEvents.test {
                 transport.receive(alertFrame(walker("buddy", 80.0)))
-                assertEquals(ProximityEvent.Arrived(listOf(nearby("buddy", 80.0))), awaitItem())
+                assertEquals(ProximityEvent.Changed(listOf(nearby("buddy", 80.0))), awaitItem())
 
                 transport.receive(ServerFrame(type = FrameTypes.PROXIMITY_CLEAR))
 

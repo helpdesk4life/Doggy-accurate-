@@ -55,9 +55,9 @@ class WalkRepository @Inject constructor(
     val radiusMeters: StateFlow<Double> = _radiusMeters.asStateFlow()
 
     /**
-     * Emits when walkers arrive inside the warning distance, when the set changes
-     * without a new arrival so the service can rebuild the alert's text, and when
-     * the last one leaves so it can withdraw the alert it posted.
+     * Emits when the set of walkers inside the warning distance changes, carrying
+     * everyone still inside, and again when the last one leaves so the service can
+     * withdraw the alert it posted.
      */
     private val _proximityEvents = MutableSharedFlow<ProximityEvent>(extraBufferCapacity = 16)
     val proximityEvents: SharedFlow<ProximityEvent> = _proximityEvents.asSharedFlow()
@@ -188,19 +188,19 @@ class WalkRepository @Inject constructor(
                     val emptied = ids.isEmpty() && alertedIds.isNotEmpty()
                     alertedIds = ids
                     when {
-                        arrived.isNotEmpty() -> {
-                            recorder?.onDogsMet(arrived)
-                            _proximityEvents.tryEmit(ProximityEvent.Arrived(arrived))
-                        }
-
                         // The last one left. Withdraw the alert rather than leave it
                         // in the shade claiming a dog is nearby when it is not.
                         emptied -> _proximityEvents.tryEmit(ProximityEvent.Cleared)
 
-                        // Someone left while others stayed. The alert still applies,
-                        // but it names the walker that left, so its text has to be
-                        // rebuilt from the ones still inside — without sounding again.
-                        else -> _proximityEvents.tryEmit(ProximityEvent.Updated(withinWarning))
+                        // Someone arrived, someone left, or both. One event either
+                        // way, carrying everyone still inside: the alert names the
+                        // most urgent walker present, not the ones that just came.
+                        // Whether the rebuild is worth a sound is the helper's call,
+                        // from what it last showed.
+                        else -> {
+                            recorder?.onDogsMet(arrived)
+                            _proximityEvents.tryEmit(ProximityEvent.Changed(withinWarning))
+                        }
                     }
                 }
             }

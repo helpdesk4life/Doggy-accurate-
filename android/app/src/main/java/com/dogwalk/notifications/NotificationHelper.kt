@@ -42,6 +42,12 @@ class NotificationHelper @Inject constructor(
 ) {
     private val manager = NotificationManagerCompat.from(context)
 
+    /**
+     * The most urgent relationship the user was last told about. Cleared by
+     * [cancelProximity], so the next alert after a withdrawal sounds.
+     */
+    private var showing: DogRelationship? = null
+
     fun createChannels() {
         val tracking = NotificationChannel(
             CHANNEL_TRACKING,
@@ -119,40 +125,44 @@ class NotificationHelper @Inject constructor(
             .build()
 
     /**
-     * Alert about the walkers that just came inside the warning distance.
+     * Post the alert about the walkers inside the warning distance.
      *
-     * When several relationships are present at once the most urgent one wins:
-     * a dog yours does not like matters more than one it does, and a stranger
-     * matters more than a friend. Otherwise a friend arriving would replace the
-     * warning with a chime, which is the wrong way round.
+     * The text names the most urgent of them: a dog yours does not like matters
+     * more than one it does, and a stranger matters more than a friend. Building
+     * it from everyone inside rather than just the arrivals is what makes the
+     * ordering hold — a friend arriving while a disliked dog is inside used to
+     * replace the warning with a chime, which is the wrong way round.
      *
-     * [silent] rebuilds the text of an alert that is already showing, for when
-     * someone leaves while others stay. It must not sound — the arrival already
-     * did — and it must not bring back an alert the user dismissed, which is why
-     * it returns early when the slot is empty.
+     * The sound is a separate decision, and [ProximityAlertPolicy] owns it: the
+     * alert re-sounds only when the most urgent walker present is more urgent than
+     * the one the user was last told about. A friend arriving next to a warning
+     * therefore changes nothing audible, and a second dog of the same standing
+     * does not replay its alarm.
      *
      * The POST_NOTIFICATIONS check is [canPostNotifications] below. Lint's
      * dataflow does not cross a private method, so the suppression is for the
      * analyser rather than for a missing guard.
      */
     @SuppressLint("MissingPermission")
-    fun notifyProximity(
-        walkers: List<NearbyWalker>,
-        marked: Map<String, MarkedDog>,
-        silent: Boolean = false,
-    ) {
+    fun notifyProximity(walkers: List<NearbyWalker>, marked: Map<String, MarkedDog>) {
         if (walkers.isEmpty()) return
         if (!canPostNotifications()) return
-        if (silent && !isProximityShowing()) return
 
         val relationship = walkers
             .groupBy { marked[it.id]?.relationship ?: DogRelationship.UNKNOWN }
-            .minByOrNull { urgency(it.key) }
+            .minByOrNull { ProximityAlertPolicy.urgency(it.key) }
             ?.key
             ?: return
 
         val group = walkers.filter { (marked[it.id]?.relationship ?: DogRelationship.UNKNOWN) == relationship }
         val closest = group.minByOrNull { it.distanceMeters } ?: return
+
+        // A rebuild that is not worth a sound must still update the text, but only
+        // if the alert is actually there: re-posting into an empty slot would bring
+        // back a notification the user already tapped away.
+        val alert = ProximityAlertPolicy.alertsOn(relationship, showing)
+        if (!alert && !isProximityShowing()) return
+        showing = relationship
 
         val title = when {
             relationship == DogRelationship.DISLIKED ->
@@ -175,9 +185,9 @@ class NotificationHelper @Inject constructor(
             .setAutoCancel(true)
             .setPriority(NotificationCompat.PRIORITY_HIGH)
             .setCategory(NotificationCompat.CATEGORY_SOCIAL)
-            // Only ever set on the refresh path. The arrival post has to alert,
-            // and that is what the urgency ordering above is for.
-            .setOnlyAlertOnce(silent)
+            // Only ever set when this post is not worth a sound, so an update to an
+            // alert that is already showing stays quiet and an arrival alerts.
+            .setOnlyAlertOnce(!alert)
             .build()
 
         runCatching { manager.notify(PROXIMITY_NOTIFICATION_ID, notification) }
@@ -187,7 +197,7 @@ class NotificationHelper @Inject constructor(
      * Whether the alert is still in the shade.
      *
      * [notifyProximity] sets `setAutoCancel(true)`, so a tap is an acknowledgement.
-     * A silent refresh must not undo it by re-posting an alert the user dismissed.
+     * A quiet rebuild must not undo it by re-posting an alert the user dismissed.
      */
     private fun isProximityShowing(): Boolean = runCatching {
         manager.activeNotifications.any { it.id == PROXIMITY_NOTIFICATION_ID }
@@ -199,8 +209,12 @@ class NotificationHelper @Inject constructor(
      * [notifyProximity] posts into a single notification slot, so this is the only
      * way an alert goes away without the user tapping it — `setAutoCancel(true)`
      * covers the tap and nothing else.
+     *
+     * Also forgets what the user was last told about, so a walker who comes back
+     * after a withdrawal alerts again rather than being treated as old news.
      */
     fun cancelProximity() {
+        showing = null
         runCatching { manager.cancel(PROXIMITY_NOTIFICATION_ID) }
     }
 
@@ -241,13 +255,6 @@ class NotificationHelper @Inject constructor(
 
         /** Long and insistent: this is the one that should make you look. */
         val DISLIKED_VIBRATION = longArrayOf(0, 400, 120, 400, 120, 400)
-
-        /** Lower is more urgent. */
-        fun urgency(relationship: DogRelationship): Int = when (relationship) {
-            DogRelationship.DISLIKED -> 0
-            DogRelationship.UNKNOWN -> 1
-            DogRelationship.FRIEND -> 2
-        }
 
         fun channelFor(relationship: DogRelationship): String = when (relationship) {
             DogRelationship.DISLIKED -> CHANNEL_DISLIKED
