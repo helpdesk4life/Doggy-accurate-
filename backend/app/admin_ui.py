@@ -26,7 +26,17 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from app import account_requests, admin, auth, config, email, invites, smtp_settings, users
+from app import (
+    account_requests,
+    admin,
+    auth,
+    config,
+    email,
+    invites,
+    ratelimit,
+    smtp_settings,
+    users,
+)
 from app.routes_admin import EMAIL_PATTERN
 
 router = APIRouter(prefix="/admin/ui", tags=["admin-ui"], include_in_schema=False)
@@ -120,7 +130,9 @@ async def login_submit(
 ):
     redis = request.app.state.redis
     try:
-        operator = await admin.authenticate(redis, email, password)
+        operator = await admin.authenticate(
+            redis, email, password, client_ip=ratelimit.client_identity(request)
+        )
     except (admin.InvalidCredentials, admin.LockedOut):
         # One message for both, and no hint about which half was wrong.
         return _page(
@@ -208,7 +220,11 @@ async def password_submit(
 
     try:
         version = await admin.change_password(
-            redis, operator, current_password, new_password
+            redis,
+            operator,
+            current_password,
+            new_password,
+            client_ip=ratelimit.client_identity(request),
         )
     except admin.LockedOut:
         return rerender("Too many failed attempts. Try again in a few minutes.")

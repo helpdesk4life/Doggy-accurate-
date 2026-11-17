@@ -8,7 +8,7 @@ import fakeredis.aioredis
 import pytest
 from fastapi.testclient import TestClient
 
-from app import auth, config, email, users
+from app import admin, auth, config, email, users
 from app.main import create_app
 
 PASSWORD = "correct-horse-battery"
@@ -304,6 +304,95 @@ def test_concurrent_refresh_of_the_same_token_is_consumed_once(redis_client):
     user_id, results = asyncio.run(scenario())
     assert results.count(user_id) == 1
     assert results.count(None) == 2
+
+
+def test_login_lockout_only_locks_the_attacking_address(client):
+    """The lockout counter is per (account, address): an attacker who burns the
+    budget cannot lock the owner out from their own device."""
+    register(client)
+
+    attacker = {"X-Forwarded-For": "203.0.113.9"}
+    for _ in range(users.MAX_LOGIN_FAILURES):
+        response = client.post(
+            "/auth/login",
+            json={"email": EMAIL, "password": "wrong-password"},
+            headers=attacker,
+        )
+        assert response.status_code == 401
+
+    locked = client.post(
+        "/auth/login",
+        json={"email": EMAIL, "password": "wrong-password"},
+        headers=attacker,
+    )
+    assert locked.status_code == 429
+
+    owner = client.post(
+        "/auth/login",
+        json={"email": EMAIL, "password": PASSWORD},
+        headers={"X-Forwarded-For": "198.51.100.7"},
+    )
+    assert owner.status_code == 200
+
+
+def test_admin_login_lockout_only_locks_the_attacking_address(client, redis_client):
+    asyncio.run(admin.create_admin(redis_client, "op@example.com", PASSWORD))
+
+    attacker = {"X-Forwarded-For": "203.0.113.9"}
+    for _ in range(admin.MAX_LOGIN_FAILURES):
+        response = client.post(
+            "/admin/auth/login",
+            json={"email": "op@example.com", "password": "wrong-password"},
+            headers=attacker,
+        )
+        assert response.status_code == 401
+
+    assert (
+        client.post(
+            "/admin/auth/login",
+            json={"email": "op@example.com", "password": "wrong-password"},
+            headers=attacker,
+        ).status_code
+        == 429
+    )
+
+    ok = client.post(
+        "/admin/auth/login",
+        json={"email": "op@example.com", "password": PASSWORD},
+        headers={"X-Forwarded-For": "198.51.100.7"},
+    )
+    assert ok.status_code == 200
+
+
+def test_reset_attempts_are_counted_per_address(client, sender):
+    register(client)
+    client.post("/auth/password-reset/request", json={"email": EMAIL})
+    code = sender.last_code()
+    wrong = "000000" if code != "000000" else "111111"
+
+    attacker = {"X-Forwarded-For": "203.0.113.9"}
+    for _ in range(users.RESET_MAX_ATTEMPTS):
+        client.post(
+            "/auth/password-reset/confirm",
+            json={"email": EMAIL, "code": wrong, "password": NEW_PASSWORD},
+            headers=attacker,
+        )
+
+    # The attacker's address has no budget left, not even for the real code.
+    refused = client.post(
+        "/auth/password-reset/confirm",
+        json={"email": EMAIL, "code": code, "password": NEW_PASSWORD},
+        headers=attacker,
+    )
+    assert refused.status_code == 400
+
+    # The owner's address still has its own budget and the real code works.
+    ok = client.post(
+        "/auth/password-reset/confirm",
+        json={"email": EMAIL, "code": code, "password": NEW_PASSWORD},
+        headers={"X-Forwarded-For": "198.51.100.7"},
+    )
+    assert ok.status_code == 204
 
 
 # --- startup checks -------------------------------------------------------

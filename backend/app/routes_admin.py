@@ -23,7 +23,17 @@ every admin, so it records *that* codes were minted, never the codes.
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
-from app import account_requests, admin, auth, config, email, invites, smtp_settings, users
+from app import (
+    account_requests,
+    admin,
+    auth,
+    config,
+    email,
+    invites,
+    ratelimit,
+    smtp_settings,
+    users,
+)
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -222,7 +232,12 @@ async def require_admin(request: Request) -> dict:
 async def login(credentials: AdminCredentials, request: Request) -> AdminTokenResponse:
     redis = _redis(request)
     try:
-        operator = await admin.authenticate(redis, credentials.email, credentials.password)
+        operator = await admin.authenticate(
+            redis,
+            credentials.email,
+            credentials.password,
+            client_ip=ratelimit.client_identity(request),
+        )
     except admin.LockedOut:
         raise HTTPException(status_code=429, detail="too many failed attempts")
     except admin.InvalidCredentials:
@@ -254,7 +269,11 @@ async def change_password(
     redis = _redis(request)
     try:
         version = await admin.change_password(
-            redis, operator, body.current_password, body.new_password
+            redis,
+            operator,
+            body.current_password,
+            body.new_password,
+            client_ip=ratelimit.client_identity(request),
         )
     except admin.LockedOut:
         raise HTTPException(status_code=429, detail="too many failed attempts")
