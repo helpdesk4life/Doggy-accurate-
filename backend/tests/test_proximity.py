@@ -184,6 +184,79 @@ def test_sweep_expires_stale_walkers_and_clears_watchers():
     assert bob_sent == []
 
 
+def test_sweep_only_refreshes_watchers_of_the_expired_walker():
+    """A sweep can only change the view of walkers who were watching an expired
+    one; everyone else must not get a frame (that is what keeps the periodic
+    sweep O(expired) instead of O(connected))."""
+
+    async def scenario():
+        redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        hub = Hub()
+        sockets = {
+            name: RecordingSocket() for name in ("alice", "bob", "carol")
+        }
+        for name, socket in sockets.items():
+            hub.add(Connection(name, name.capitalize(), socket))
+
+        await geo.upsert(redis, "alice", BASE_LAT, BASE_LON)
+        await geo.upsert(redis, "bob", north(100), BASE_LON)
+        await geo.upsert(redis, "carol", north(5000), BASE_LON)  # far outside 500 m
+        await refresh_neighborhood(redis, hub, "alice", BASE_LAT, BASE_LON, 500)
+        await refresh_neighborhood(redis, hub, "bob", north(100), BASE_LON, 500)
+        await refresh_neighborhood(redis, hub, "carol", north(5000), BASE_LON, 500)
+        for socket in sockets.values():
+            socket.sent.clear()
+
+        await redis.zadd(geo.SEEN_KEY, {"bob": time.time() - 120})
+
+        app = SimpleNamespace(state=SimpleNamespace(redis=redis, geo_redis=redis, hub=hub))
+        expired = await sweep_once(app)
+        return expired, {name: s.sent for name, s in sockets.items()}
+
+    expired, sent = asyncio.run(scenario())
+
+    assert expired == ["bob"]
+    # Alice was watching Bob: her map is cleared.
+    assert sent["alice"][-1]["type"] == "PROXIMITY_CLEAR"
+    # Bob watched nobody stale, Carol watched nobody at all: no frames for them.
+    assert sent["bob"] == []
+    assert sent["carol"] == []
+
+
+def test_refresh_neighborhood_records_last_neighbors():
+    """last_neighbors must reflect what the walker was last shown, otherwise the
+    sweeper cannot tell which connections an expired walker was visible to."""
+
+    async def scenario():
+        redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        hub = Hub()
+        hub.add(Connection("alice", "Alice", RecordingSocket()))
+        hub.add(Connection("bob", "Bob", RecordingSocket()))
+        await geo.upsert(redis, "alice", BASE_LAT, BASE_LON)
+        await geo.upsert(redis, "bob", north(100), BASE_LON)
+        await refresh_neighborhood(redis, hub, "alice", BASE_LAT, BASE_LON, 500)
+        return hub.get("alice").last_neighbors
+
+    assert asyncio.run(scenario()) == {"bob"}
+
+
+def test_geo_positions_and_remove_many_are_batched_helpers():
+    async def scenario():
+        redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        await geo.upsert(redis, "a", BASE_LAT, BASE_LON)
+        await geo.upsert(redis, "b", north(100), BASE_LON)
+        coords = await geo.positions(redis, ["a", "b", "gone"])
+        await geo.remove_many(redis, ["a", "b"])
+        return coords, await geo.positions(redis, ["a", "b"])
+
+    coords, after = asyncio.run(scenario())
+
+    assert coords["a"] == pytest.approx((BASE_LAT, BASE_LON))
+    assert coords["b"][0] == pytest.approx(north(100))
+    assert "gone" not in coords
+    assert after == {}
+
+
 def test_alert_carries_no_coordinates(client):
     """A neighbour is a distance and a bearing, never a place.
 

@@ -23,6 +23,7 @@ version invalidates every token that user has ever been issued, which is what
 "log out everywhere" needs.
 """
 
+import asyncio
 import base64
 import hashlib
 import hmac
@@ -119,6 +120,23 @@ def verify_password(password: str, stored: str) -> bool:
     except (ValueError, TypeError):
         return False
     return hmac.compare_digest(actual, expected)
+
+
+# scrypt at N=2**14, r=8 costs ~16 MiB and tens of milliseconds of CPU per call.
+# That must not run on the event loop - one login would stall every websocket in
+# the process - so the async wrappers below run it on a worker thread, bounded by
+# a semaphore so concurrent hashes cannot exhaust memory.
+_HASH_SEMAPHORE = asyncio.Semaphore(8)
+
+
+async def hash_password_async(password: str) -> str:
+    async with _HASH_SEMAPHORE:
+        return await asyncio.to_thread(hash_password, password)
+
+
+async def verify_password_async(password: str, stored: str) -> bool:
+    async with _HASH_SEMAPHORE:
+        return await asyncio.to_thread(verify_password, password, stored)
 
 
 def _encode(user_id: str, token_type: str, version: int, ttl: int, jti: str | None) -> str:

@@ -223,7 +223,7 @@ async def change_password(body: ChangePasswordRequest, request: Request) -> Toke
 
     # The point of the flow is that the operator's password stops working.
     # Accepting it back would clear the flag without changing anything.
-    if auth.verify_password(body.new_password, user["password_hash"]):
+    if await auth.verify_password_async(body.new_password, user["password_hash"]):
         raise HTTPException(
             status_code=400, detail="choose a password different from the temporary one"
         )
@@ -366,7 +366,7 @@ async def delete_account(body: DeleteAccountRequest, request: Request) -> Respon
     redis = _redis(request)
     user = await _require_user(request)
 
-    if not auth.verify_password(body.password, user["password_hash"]):
+    if not await auth.verify_password_async(body.password, user["password_hash"]):
         raise HTTPException(status_code=401, detail="invalid password")
 
     user_id = user["user_id"]

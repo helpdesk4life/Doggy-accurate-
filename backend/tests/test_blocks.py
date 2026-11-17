@@ -400,10 +400,12 @@ def test_blocking_a_live_walker_updates_both_maps(client):
         assert alice.receive_json()["type"] == "PROXIMITY_CLEAR"
         assert bob.receive_json()["type"] == "PROXIMITY_CLEAR"
 
-        # And the next fix keeps it that way.
+        # And the next fix keeps it that way. Bob gets the clear; Alice does not
+        # get a redundant frame, because last_neighbors now tracks what she was
+        # actually shown (empty after the block), so Bob's fix no longer fans out
+        # to her while she has him blocked.
         bob.send_json(location(north(120)))
         assert bob.receive_json()["type"] == "PROXIMITY_CLEAR"
-        assert alice.receive_json()["type"] == "PROXIMITY_CLEAR"
 
 
 def test_unblocking_a_live_walker_brings_them_back(client):

@@ -38,22 +38,34 @@ async def sweep_once(app: FastAPI) -> list[str]:
     hub: Hub = app.state.hub
 
     stale = await geo.stale_walkers(geo_redis, config.settings.walker_ttl_seconds)
-    for walker_id in stale:
-        await geo.remove(geo_redis, walker_id)
+    if stale:
+        await geo.remove_many(geo_redis, stale)
 
-    for connection in hub.all():
-        coords = await geo.position(geo_redis, connection.walker_id)
-        if coords is None:
-            continue
-        await refresh_neighborhood(
-            redis,
-            hub,
-            connection.walker_id,
-            coords[0],
-            coords[1],
-            config.settings.proximity_radius_m,
-            geo_redis=geo_redis,
-        )
+        # Positions only change on a fix, and every fix fans out to the affected
+        # watchers immediately, so the only thing a sweep can change is the view
+        # of walkers who were watching an expired one. Refresh those only,
+        # instead of every connected walker on every interval.
+        stale_set = set(stale)
+        watchers = {
+            connection.walker_id
+            for connection in hub.all()
+            if connection.last_neighbors & stale_set
+        }
+        if watchers:
+            coords_by_id = await geo.positions(geo_redis, watchers)
+            for walker_id in watchers:
+                coords = coords_by_id.get(walker_id)
+                if coords is None:
+                    continue
+                await refresh_neighborhood(
+                    redis,
+                    hub,
+                    walker_id,
+                    coords[0],
+                    coords[1],
+                    config.settings.proximity_radius_m,
+                    geo_redis=geo_redis,
+                )
 
     return stale
 

@@ -82,7 +82,7 @@ async def create_admin(redis, email: str, password: str) -> dict:
     admin_id = uuid.uuid4().hex
     record = {
         "email": email,
-        "password_hash": auth.hash_password(password),
+        "password_hash": await auth.hash_password_async(password),
         "created_at": int(time.time()),
         "token_version": 1,
     }
@@ -127,7 +127,7 @@ async def authenticate(redis, email: str, password: str, client_ip: str = "") ->
     # Always run the hash, even when the address is unknown, so the two failure
     # modes take the same time. Same reasoning as users.authenticate().
     stored = admin["password_hash"] if admin is not None else _DUMMY_PASSWORD_HASH
-    password_ok = auth.verify_password(password, stored)
+    password_ok = await auth.verify_password_async(password, stored)
 
     if admin is None or not password_ok:
         count = await redis.hincrby(fail_key, field, 1)
@@ -157,12 +157,13 @@ async def change_password(
     """
     admin = await authenticate(redis, operator["email"], current_password, client_ip)
 
-    if auth.verify_password(new_password, admin["password_hash"]):
+    if await auth.verify_password_async(new_password, admin["password_hash"]):
         raise SamePassword()
 
     key = ADMIN_KEY.format(admin_id=operator["admin_id"])
+    new_hash = await auth.hash_password_async(new_password)
     async with redis.pipeline(transaction=True) as pipe:
-        pipe.hset(key, "password_hash", auth.hash_password(new_password))
+        pipe.hset(key, "password_hash", new_hash)
         pipe.hincrby(key, "token_version", 1)
         results = await pipe.execute()
 
