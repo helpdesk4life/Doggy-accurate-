@@ -27,6 +27,9 @@ RATE_LIMITED = 4429
 # 1009 is the websocket "message too big" close code.
 MESSAGE_TOO_BIG = 1009
 
+# Close code for "a newer session for this account replaced this socket".
+REPLACED = 4409
+
 # A location frame is ~100 bytes. uvicorn's own ws-max-size is in megabytes, so
 # the cap that actually matters is here: anything past this is not a fix but an
 # attempt to make the server buffer and parse it.
@@ -106,6 +109,12 @@ async def walk_socket(
     walker_id = user["user_id"]
     name = _clean_name(name)
 
+    # If this account already has a socket, the new one wins. Closing the old one
+    # matters: left alone it would keep running while the hub tracks only the new
+    # connection, and its disconnect handler would drop the walker's hub entry and
+    # geo position out from under the live session.
+    await hub.close(walker_id, code=REPLACED, reason="replaced by a newer session")
+
     hub.add(Connection(walker_id=walker_id, name=name, websocket=websocket))
     await hub.send(
         walker_id,
@@ -181,8 +190,13 @@ async def walk_socket(
         pass
     finally:
         connection = hub.get(walker_id)
+        if connection is not None and connection.websocket is not websocket:
+            # A newer socket for this account replaced this one; the hub entry
+            # and the geo position belong to that session now.
+            connection = None
         watchers = set(connection.last_neighbors) if connection else set()
-        hub.remove(walker_id)
-        await geo.remove(redis, walker_id)
+        if connection is not None:
+            hub.remove(walker_id)
+            await geo.remove(redis, walker_id)
         await refresh_watchers(redis, hub, watchers, radius_m)
         logger.info("walker %s disconnected", walker_id)

@@ -153,6 +153,30 @@ def test_oversized_frame_closes_the_socket(redis_client, monkeypatch):
             assert exc.value.code == ws.MESSAGE_TOO_BIG
 
 
+def test_a_second_socket_for_the_same_walker_replaces_the_first(redis_client):
+    with make_client(redis_client, rate_limit=False) as client:
+        user_id, headers = sign_up(client, "alice@example.com")
+        with client.websocket_connect("/ws/walk", headers=headers) as first:
+            assert first.receive_json()["type"] == "welcome"
+            with client.websocket_connect("/ws/walk", headers=headers) as second:
+                assert second.receive_json()["type"] == "welcome"
+
+                with pytest.raises(WebSocketDisconnect) as exc:
+                    first.receive_json()
+                assert exc.value.code == ws.REPLACED
+
+                # The live session still owns the hub entry and the geo position:
+                # a fix from the new socket is applied, and the old socket's
+                # disconnect must not remove them.
+                second.send_json(location(BASE_LAT))
+                assert second.receive_json()["type"] == "PROXIMITY_CLEAR"
+                lat, _ = stored_position(redis_client, user_id)
+                assert lat == pytest.approx(BASE_LAT)
+
+        # Both sockets are gone now, so the position is removed.
+        assert stored_position(redis_client, user_id) is None
+
+
 def test_malformed_json_still_gets_an_error_frame(redis_client):
     with make_client(redis_client, rate_limit=False) as client:
         _, headers = sign_up(client, "alice@example.com")

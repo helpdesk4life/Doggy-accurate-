@@ -320,6 +320,7 @@ def test_production_accepts_a_real_secret():
     settings = config.Settings(
         environment="production",
         jwt_secret="a" * 48,
+        public_base_url="https://backend.example.com",
         # The email guard is a separate check; see the tests below.
         allow_logging_email=True,
     )
@@ -331,6 +332,7 @@ def test_production_refuses_to_log_reset_codes():
     settings = config.Settings(
         environment="production",
         jwt_secret="a" * 48,
+        public_base_url="https://backend.example.com",
     )
 
     with pytest.raises(RuntimeError, match="EMAIL_SENDER"):
@@ -341,10 +343,39 @@ def test_production_accepts_an_acknowledged_logging_sender():
     settings = config.Settings(
         environment="production",
         jwt_secret="a" * 48,
+        public_base_url="https://backend.example.com",
         allow_logging_email=True,
     )
 
     settings.validate()
+
+
+def test_production_refuses_a_plain_http_base_url():
+    settings = config.Settings(
+        environment="production",
+        jwt_secret="a" * 48,
+        public_base_url="http://backend.example.com",
+        allow_logging_email=True,
+    )
+
+    with pytest.raises(RuntimeError, match="PUBLIC_BASE_URL"):
+        settings.validate()
+
+
+def test_production_refuses_a_localhost_base_url():
+    settings = config.Settings(
+        environment="production",
+        jwt_secret="a" * 48,
+        public_base_url="https://localhost:8000",
+        allow_logging_email=True,
+    )
+
+    with pytest.raises(RuntimeError, match="PUBLIC_BASE_URL"):
+        settings.validate()
+
+
+def test_development_tolerates_the_default_base_url():
+    config.Settings(environment="development", jwt_secret=config.DEV_JWT_SECRET).validate()
 
 
 def test_development_tolerates_the_logging_sender():
@@ -389,3 +420,20 @@ def test_auth_responses_are_not_cacheable(client):
 
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_admin_ui_pages_carry_a_strict_csp(client):
+    response = client.get("/admin/ui/login")
+
+    assert response.status_code == 200
+    csp = response.headers["content-security-policy"]
+    assert "default-src 'none'" in csp
+    assert "form-action 'self'" in csp
+    assert "frame-ancestors 'none'" in csp
+    assert response.headers["x-frame-options"] == "DENY"
+
+
+def test_api_responses_do_not_carry_a_csp(client):
+    response = client.post("/auth/login", json={"email": EMAIL, "password": PASSWORD})
+
+    assert "content-security-policy" not in response.headers

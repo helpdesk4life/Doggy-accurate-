@@ -138,6 +138,15 @@ def create_app(
         # gets the same treatment.
         if request.url.path.startswith(("/auth", "/admin")):
             response.headers["Cache-Control"] = "no-store"
+        if request.url.path.startswith("/admin/ui"):
+            # The panel is server-rendered with no JavaScript at all, so the
+            # policy can be strict: no scripts, no frames, forms only to self.
+            # style-src needs 'unsafe-inline' for the templates' style attributes.
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'none'; style-src 'self' 'unsafe-inline'; "
+                "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+            )
+            response.headers["X-Frame-Options"] = "DENY"
         return response
 
     if config.settings.jwt_secret_is_default:

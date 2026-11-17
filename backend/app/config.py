@@ -124,6 +124,21 @@ class Settings:
                 "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(48))\""
             )
 
+        if not self.is_development:
+            # Password-reset links are built from this, so a wrong value sends
+            # working reset links somewhere that is not this deployment - or over
+            # plain http. Development keeps the localhost default.
+            base = self.public_base_url.strip().lower()
+            if not base.startswith("https://") or base.startswith(
+                ("https://localhost", "https://127.0.0.1", "https://[::1]")
+            ):
+                raise RuntimeError(
+                    f"PUBLIC_BASE_URL is {self.public_base_url!r} and DOGWALK_ENV is "
+                    f"{self.environment!r}. Reset links are built from it, so outside "
+                    "development it must be the https URL this deployment is actually "
+                    "served on, e.g. https://backend.example.com."
+                )
+
         if self.distance_quantum_m < 0 or self.bearing_quantum_deg < 0:
             raise RuntimeError(
                 "DISTANCE_QUANTUM_M and BEARING_QUANTUM_DEG must not be negative. "
