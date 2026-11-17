@@ -67,6 +67,46 @@ password-change route (rotation is delete + `create_admin.py`); the
 email-verification decision; a reconnect backoff pass; accessibility; `/me`;
 blocks-cap atomicity; backups and monitoring on the box.
 
+## Session log — 2026-11-17 — the `thomas` password in the secrets file never matched the box
+
+The user could not log in to the VPS. The recorded `THOMAS_USER_PASSWORD` was
+the problem, and it was not a stale rotation — it was a value that had never
+been applied.
+
+**Diagnosis.** The account was healthy: `passwd -S thomas` → `P` (usable),
+`lastchg` = 20774 = today, shell `/bin/bash`, uid 1001. But a `crypt(3)`
+comparison of the file's value against `/etc/shadow` returned **false**, and a
+real `ssh thomas@207.180.240.29` returned `Permission denied`. The file was
+written at 12:55, after the 10:54 rotation, so the value in it was generated
+during the secrets-reconciliation pass and never pushed to the box.
+
+**The other three were fine**, verified live rather than assumed:
+
+| Secret | Check | Result |
+| --- | --- | --- |
+| `JWT_SECRET` | sha256 of the value vs `/home/thomas/dog/backend/.env` | `9ba88ebed0cf4de6` both sides |
+| `CADDY_BASIC_AUTH_PASSWORD` | plaintext vs the deployed bcrypt hash | gate `401` without, `303` with |
+| `ADMIN_PANEL_PASSWORD` | `POST /admin/auth/login` | `200` |
+
+**Fixed** by setting a fresh 32-character alphanumeric value with `chpasswd`
+over SSH, the password on stdin and never on a command line. Verified three
+ways before the file was touched: `crypt` against the shadow hash → `true`,
+a fresh `ssh thomas@…` → `thomas`, and `sudo -S -k id -un` → `root`. The file
+was then rewritten in place, CRLF preserved, 13 keys intact, and a login driven
+purely by reading the file succeeded.
+
+**Root password rotated too.** Reading `.secrets/askpass.sh` to understand the
+SSH path printed the root password into this session's transcript — the same
+exposure class as the five secrets above. It was live (`crypt` against root's
+shadow hash → `true`), so it was rotated: fresh 32-character value via
+`chpasswd`, new login → `root`, old password → `Permission denied`, and
+`askpass.sh` rewritten so `vps.sh` keeps working. `thomas` + `sudo` was the
+fallback throughout, which is why the rotation was safe to do.
+
+**Still open**: `~/.ssh/authorized_keys` on the box is still empty, so the
+`thomas` password remains the only way in from the dev machine. `askpass.sh`
+holds the root password in plaintext beside it.
+
 ## Session log — 2026-11-17 — the five leaked secrets: three rotated, logs scrubbed
 
 The `sed` that printed five secrets into the transcript was closed out. Three of
