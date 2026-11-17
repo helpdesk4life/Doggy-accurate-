@@ -418,9 +418,16 @@ documented it, plus the two email test files. Current gate: 235 backend tests,
 
 **Walk history and stats landed** (P3): distance, duration and dogs met, all
 derived client-side from what the app already receives — the first feature that
-gives a walk a reason to end. The next visible thing is **report a walker**: the
-other half of the safety story, and it would reuse the block plumbing — a report
-is a block plus a row an operator can read.
+gives a walk a reason to end.
+
+**Report a walker — decided against, 2026-11-17.** It was the proposed next
+visible thing: the other half of the safety story, reusing the block plumbing as
+a block plus a row an operator can read. It is not being built. A report is a
+claim, not evidence — the server keeps no coordinates and no history, so an
+operator could never verify one. Making reports actionable would mean retaining
+evidence, and that is the privacy design the app is built on. Blocking stays the
+whole safety story: you can make someone invisible to you, and that is all the
+server will ever be asked to do about a person.
 
 ## Decisions I would like from you
 
