@@ -89,9 +89,10 @@ def test_handshake_limit_is_off_when_the_limiter_is_off(redis_client, monkeypatc
                 assert sock.receive_json()["type"] == "welcome"
 
 
-def test_frames_faster_than_the_interval_are_dropped(redis_client, monkeypatch):
-    # Two sends milliseconds apart are inside any sane interval, while the first
-    # fix always passes because last_fix_at starts at 0.0.
+def test_frames_inside_the_interval_are_held_not_applied(redis_client, monkeypatch):
+    # The floor bounds evaluation to one fix per interval: with a 5 s interval,
+    # rapid follow-up fixes must not be applied yet. The first fix always passes
+    # because last_fix_at starts at 0.0.
     monkeypatch.setattr(ws, "MIN_FRAME_INTERVAL_SECONDS", 5.0)
     with make_client(redis_client, rate_limit=False) as client:
         user_id, headers = sign_up(client, "alice@example.com")
@@ -99,12 +100,30 @@ def test_frames_faster_than_the_interval_are_dropped(redis_client, monkeypatch):
             sock.receive_json()  # welcome
             sock.send_json(location(BASE_LAT + 0.001))
             sock.send_json(location(BASE_LAT + 0.002))
+            sock.send_json(location(BASE_LAT + 0.003))
             assert sock.receive_json()["type"] == "PROXIMITY_CLEAR"  # first fix only
 
             # Asserted inside the socket: on disconnect the handler removes the
             # walker's geo entry, so the position is gone after the with-block.
             lat, _ = stored_position(redis_client, user_id)
-            assert lat == pytest.approx(BASE_LAT + 0.001)
+            assert lat == pytest.approx(BASE_LAT + 0.001)  # later fixes still pending
+
+
+def test_a_pending_fix_is_applied_when_the_interval_elapses(redis_client, monkeypatch):
+    # Coalescing: the newest pending fix is applied once the interval allows, so
+    # a fast movement is throttled but never dropped.
+    monkeypatch.setattr(ws, "MIN_FRAME_INTERVAL_SECONDS", 0.2)
+    with make_client(redis_client, rate_limit=False) as client:
+        user_id, headers = sign_up(client, "alice@example.com")
+        with client.websocket_connect("/ws/walk", headers=headers) as sock:
+            sock.receive_json()  # welcome
+            sock.send_json(location(BASE_LAT + 0.001))
+            sock.send_json(location(BASE_LAT + 0.002))
+            assert sock.receive_json()["type"] == "PROXIMITY_CLEAR"  # first fix, immediate
+            assert sock.receive_json()["type"] == "PROXIMITY_CLEAR"  # pending fix, after ~0.2 s
+
+            lat, _ = stored_position(redis_client, user_id)
+            assert lat == pytest.approx(BASE_LAT + 0.002)  # newest wins
 
 
 def test_every_frame_is_processed_when_the_interval_is_zero(redis_client, monkeypatch):

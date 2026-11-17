@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import time
@@ -31,9 +32,11 @@ MESSAGE_TOO_BIG = 1009
 # attempt to make the server buffer and parse it.
 MAX_FRAME_BYTES = 4096
 
-# The client sends a fix every 5 s, so processing at most one fix per second
+# The client sends a fix every 5 s, so evaluating at most one fix per second
 # loses nothing. Without the floor a client could make the server run a
 # GEOSEARCH fan-out (update_walker refreshes every neighbour) per frame sent.
+# Fixes arriving inside the interval are coalesced, newest wins, so a fast
+# movement is never lost - only throttled.
 MIN_FRAME_INTERVAL_SECONDS = 1.0
 
 
@@ -111,46 +114,65 @@ async def walk_socket(
     logger.info("walker %s connected (%s)", walker_id, name or "unnamed")
 
     last_fix_at = 0.0
+    pending = None  # newest fix received inside the floor interval, not applied yet
 
     try:
         while True:
             # receive() rather than receive_json(): the size of the frame has to
             # be known before it is parsed, and uvicorn's own cap is megabytes.
-            message = await websocket.receive()
-            if message["type"] == "websocket.disconnect":
-                raise WebSocketDisconnect(message.get("code", 1000))
-
-            text = message.get("text")
-            if text is None and message.get("bytes") is not None:
-                text = message["bytes"].decode("utf-8", errors="replace")
-            if text is None:
-                continue
-
-            if len(text) > MAX_FRAME_BYTES:
-                await websocket.close(code=MESSAGE_TOO_BIG, reason="frame too large")
-                return
-
+            # When a fix is pending, wait no longer than the rest of the floor
+            # interval, so the pending fix is applied on time even when no
+            # further frame arrives.
+            timeout = None
+            if pending is not None:
+                remaining = MIN_FRAME_INTERVAL_SECONDS - (time.monotonic() - last_fix_at)
+                timeout = remaining if remaining > 0 else 0.0
             try:
-                raw = json.loads(text)
-            except json.JSONDecodeError:
-                await hub.send(walker_id, ErrorFrame(message="malformed JSON").model_dump())
-                continue
+                message = await asyncio.wait_for(websocket.receive(), timeout=timeout)
+            except asyncio.TimeoutError:
+                message = None
 
-            try:
-                frame = LocationFrame.model_validate(raw)
-            except ValidationError as exc:
-                await hub.send(
-                    walker_id,
-                    ErrorFrame(message=exc.errors()[0]["msg"]).model_dump(),
-                )
-                continue
+            frame = None
+            if message is not None:
+                if message["type"] == "websocket.disconnect":
+                    raise WebSocketDisconnect(message.get("code", 1000))
 
-            # Frames faster than the interval are dropped: the next fix carries a
-            # newer position anyway, so this costs nothing but the flood.
-            now = time.monotonic()
-            if now - last_fix_at < MIN_FRAME_INTERVAL_SECONDS:
-                continue
-            last_fix_at = now
+                text = message.get("text")
+                if text is None and message.get("bytes") is not None:
+                    text = message["bytes"].decode("utf-8", errors="replace")
+                if text is not None:
+                    if len(text) > MAX_FRAME_BYTES:
+                        await websocket.close(code=MESSAGE_TOO_BIG, reason="frame too large")
+                        return
+
+                    try:
+                        raw = json.loads(text)
+                    except json.JSONDecodeError:
+                        await hub.send(walker_id, ErrorFrame(message="malformed JSON").model_dump())
+                        continue
+
+                    try:
+                        frame = LocationFrame.model_validate(raw)
+                    except ValidationError as exc:
+                        await hub.send(
+                            walker_id,
+                            ErrorFrame(message=exc.errors()[0]["msg"]).model_dump(),
+                        )
+                        continue
+
+                    if time.monotonic() - last_fix_at < MIN_FRAME_INTERVAL_SECONDS:
+                        # Inside the floor interval: keep only the newest fix. A
+                        # flood still costs at most one evaluation per interval,
+                        # and the walker's final position is never lost.
+                        pending = frame
+                        continue
+
+            if frame is None:
+                if pending is None:
+                    continue
+                frame = pending
+            pending = None
+            last_fix_at = time.monotonic()
 
             await geo.upsert(redis, walker_id, frame.lat, frame.lon)
             await update_walker(redis, hub, walker_id, frame.lat, frame.lon, radius_m)
