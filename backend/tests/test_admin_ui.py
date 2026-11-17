@@ -334,3 +334,110 @@ def test_no_page_carries_a_position(client, operator):
         body = client.get(path).text.lower()
         for word in ("latitude", "longitude", "bearing", "distance_m", "accuracy"):
             assert word not in body, f"{path} mentions {word}"
+
+
+# --- the operator's own password --------------------------------------------
+
+
+def change_password(client, current: str, new: str, confirm: str | None = None):
+    return client.post(
+        "/admin/ui/password",
+        data={
+            "current_password": current,
+            "new_password": new,
+            "confirm_password": new if confirm is None else confirm,
+        },
+        follow_redirects=False,
+    )
+
+
+def test_the_password_page_renders(client, operator):
+    sign_in(client)
+
+    response = client.get("/admin/ui/password")
+
+    assert response.status_code == 200
+    assert "Current password" in response.text
+
+
+def test_the_password_page_needs_a_cookie(client, operator):
+    response = client.get("/admin/ui/password", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/admin/ui/login"
+
+
+def test_changing_the_password_keeps_this_browser_signed_in(client, operator):
+    sign_in(client)
+
+    response = change_password(client, ADMIN_PASSWORD, "a-brand-new-password")
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/admin/ui/password?saved=1"
+    assert client.get("/admin/ui", follow_redirects=False).status_code == 200
+
+
+def test_changing_the_password_signs_out_another_browser(client, operator):
+    sign_in(client)
+    other_browser = client.cookies.get("dogwalk_admin")
+
+    change_password(client, ADMIN_PASSWORD, "a-brand-new-password")
+
+    client.cookies.clear()
+    client.cookies.set("dogwalk_admin", other_browser)
+    response = client.get("/admin/ui", follow_redirects=False)
+
+    assert response.status_code == 303
+    assert response.headers["location"] == "/admin/ui/login"
+
+
+def test_the_new_password_opens_the_login_page(client, operator):
+    sign_in(client)
+    change_password(client, ADMIN_PASSWORD, "a-brand-new-password")
+    client.post("/admin/ui/logout", follow_redirects=False)
+
+    response = client.post(
+        "/admin/ui/login",
+        data={"email": ADMIN_EMAIL, "password": "a-brand-new-password"},
+        follow_redirects=False,
+    )
+
+    assert response.status_code == 303
+
+
+def test_a_mismatched_confirmation_is_refused(client, operator):
+    sign_in(client)
+
+    response = change_password(
+        client, ADMIN_PASSWORD, "a-brand-new-password", confirm="something-else"
+    )
+
+    assert response.status_code == 400
+    assert "do not match" in response.text
+
+
+def test_a_wrong_current_password_is_refused(client, operator):
+    sign_in(client)
+
+    response = change_password(client, "not-the-password", "a-brand-new-password")
+
+    assert response.status_code == 400
+    assert "not your current password" in response.text
+
+
+def test_the_same_password_is_refused(client, operator):
+    sign_in(client)
+
+    response = change_password(client, ADMIN_PASSWORD, ADMIN_PASSWORD)
+
+    assert response.status_code == 400
+    assert "different" in response.text
+
+
+def test_a_short_new_password_is_refused(client, operator):
+    sign_in(client)
+
+    response = change_password(client, ADMIN_PASSWORD, "short")
+
+    assert response.status_code == 400
+    assert "at least 8" in response.text

@@ -43,6 +43,18 @@ class AdminTokenResponse(BaseModel):
     email: str
 
 
+class ChangeAdminPasswordRequest(BaseModel):
+    """The current password is required, not optional.
+
+    An admin token alone must not be enough to take the account over: a stolen
+    cookie would otherwise be a permanent takeover, and the real operator would
+    be locked out of their own panel.
+    """
+
+    current_password: str = Field(min_length=1, max_length=128)
+    new_password: str = Field(min_length=8, max_length=128)
+
+
 class UserSummary(BaseModel):
     user_id: str
     email: str
@@ -218,6 +230,44 @@ async def login(credentials: AdminCredentials, request: Request) -> AdminTokenRe
 
     token, ttl = auth.issue_admin_token(operator["admin_id"], int(operator["token_version"]))
     await admin.record(redis, operator, "login")
+    return AdminTokenResponse(
+        access_token=token,
+        expires_in=ttl,
+        admin_id=operator["admin_id"],
+        email=operator["email"],
+    )
+
+
+@router.post("/auth/password", response_model=AdminTokenResponse)
+async def change_password(
+    body: ChangeAdminPasswordRequest,
+    request: Request,
+    operator: dict = Depends(require_admin),
+) -> AdminTokenResponse:
+    """Replace the operator's password and sign out every other session.
+
+    Returns a fresh token rather than 204. The change bumps ``token_version``,
+    which kills the token that authorised it, so handing back a replacement is
+    what keeps the caller signed in while every other device drops. That is the
+    same shape as the walker's ``/auth/password/change``.
+    """
+    redis = _redis(request)
+    try:
+        version = await admin.change_password(
+            redis, operator, body.current_password, body.new_password
+        )
+    except admin.LockedOut:
+        raise HTTPException(status_code=429, detail="too many failed attempts")
+    except admin.InvalidCredentials:
+        # 400 rather than 401: the caller is authenticated, it is the
+        # confirmation that failed. A 401 would tell a browser to sign out.
+        raise HTTPException(status_code=400, detail="current password is wrong")
+    except admin.SamePassword:
+        raise HTTPException(
+            status_code=400, detail="choose a password different from the current one"
+        )
+
+    token, ttl = auth.issue_admin_token(operator["admin_id"], version)
     return AdminTokenResponse(
         access_token=token,
         expires_in=ttl,

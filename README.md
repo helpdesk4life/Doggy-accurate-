@@ -397,6 +397,7 @@ and `smtp_test` with the recipient and whether it was delivered.
 | Endpoint | Purpose |
 | --- | --- |
 | `POST /admin/auth/login` | Exchange email and password for an admin token |
+| `POST /admin/auth/password` | Change the operator's own password; returns a fresh token and signs out every other session |
 | `GET /admin/users` | Accounts, newest first, `offset`/`limit` (max 100) |
 | `POST /admin/users` | Create an account with a generated password, without spending an invite code (201) |
 | `GET /admin/users/{id}` | One account, with its live session count |

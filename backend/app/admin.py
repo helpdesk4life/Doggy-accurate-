@@ -60,6 +60,10 @@ class LockedOut(Exception):
     """Too many failed logins for this admin; try again later."""
 
 
+class SamePassword(Exception):
+    """The new password is the current one, so nothing would change."""
+
+
 def normalise_email(email: str) -> str:
     return email.strip().lower()
 
@@ -122,6 +126,37 @@ async def authenticate(redis, email: str, password: str) -> dict:
 
     await redis.delete(fail_key)
     return admin
+
+
+async def change_password(
+    redis, operator: dict, current_password: str, new_password: str
+) -> int:
+    """Replace an operator's password and sign out every other session.
+
+    The current password is required even though the caller already holds a
+    valid admin token. Without it a stolen token is enough to take the account
+    over and lock the real operator out, which is the one thing a password
+    change exists to prevent. It goes through ``authenticate`` so a wrong guess
+    counts toward the same lockout as a wrong login.
+
+    Returns the new ``token_version``. Every token minted before this call is
+    dead, including the one that authorised it; the caller re-issues from the
+    returned version, which is what keeps the session that made the change
+    alive while every other one drops.
+    """
+    admin = await authenticate(redis, operator["email"], current_password)
+
+    if auth.verify_password(new_password, admin["password_hash"]):
+        raise SamePassword()
+
+    key = ADMIN_KEY.format(admin_id=operator["admin_id"])
+    async with redis.pipeline(transaction=True) as pipe:
+        pipe.hset(key, "password_hash", auth.hash_password(new_password))
+        pipe.hincrby(key, "token_version", 1)
+        results = await pipe.execute()
+
+    await record(redis, operator, "change_password")
+    return int(results[1])
 
 
 async def resolve_admin_token(redis, token: str) -> dict:

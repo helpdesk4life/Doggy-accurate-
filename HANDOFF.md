@@ -62,10 +62,49 @@ the deployed backend image did not change all day — every box-side change was
 
 **Carried forward**: ~~`THOMAS_USER_PASSWORD` matches no known account~~ —
 resolved 2026-11-17: it is the VPS *Linux* account `thomas`, not an app account,
-and it has been rotated (see **Session log — 2026-11-17**); still no operator
-password-change route (rotation is delete + `create_admin.py`); the
-email-verification decision; a reconnect backoff pass; accessibility; `/me`;
-blocks-cap atomicity; backups and monitoring on the box.
+and it has been rotated (see **Session log — 2026-11-17**); ~~still no operator
+password-change route (rotation is delete + `create_admin.py`)~~ — closed
+2026-11-17, see **Session log — 2026-11-17 — the operator password-change
+route**; the email-verification decision; a reconnect backoff pass;
+accessibility; `/me`; blocks-cap atomicity; backups and monitoring on the box.
+
+## Session log — 2026-11-17 — the operator password-change route
+
+The last hole in the admin panel. Rotating an operator password used to mean
+deleting both admin keys and re-running `create_admin.py`, which changed the
+admin id and reset `token_version` — a workaround standing in for a missing
+feature, and one that had already been used twice in two days.
+
+**`admin.change_password`** verifies the current password through
+`authenticate`, so a wrong guess counts toward the same five-failure lockout as
+a wrong login, then rewrites `password_hash` and bumps `token_version` in one
+transaction. Every token minted before the call is dead, including the one that
+authorised it.
+
+**Both surfaces reissue.** `POST /admin/auth/password` returns a fresh
+`AdminTokenResponse` and the panel sets a new cookie, so the session that made
+the change stays signed in while every other device drops. Returning 204 would
+have signed the operator out of the browser they had just used, which reads as
+a failure.
+
+**The current password is required, not optional.** An admin token alone must
+not be enough: a stolen cookie would otherwise be a permanent takeover, and the
+real operator would be locked out of their own panel. A wrong current password
+answers 400 rather than 401 — the caller *is* authenticated, it is the
+confirmation that failed, and a 401 would tell a browser to sign out.
+
+**The panel** has `/admin/ui/password`, a nav entry, and a confirmation field
+checked in the route rather than in the store function, because it is a typing
+mistake rather than a rule about passwords and the JSON API has no second field.
+
+Test count went from 235 to 253: nine on the API (the replacement token works,
+the old one dies, other sessions die, the new password is the one that logs in,
+wrong current password, same password, short password, no token, and an audit
+entry carrying neither password) and nine on the panel (the page renders, needs
+a cookie, keeps this browser signed in, signs out another, the new password
+opens the login page, mismatched confirmation, wrong current, same password,
+short password). `ruff` reports nothing new in the changed files beyond the
+`Depends`-in-defaults pattern every route in `routes_admin.py` already uses.
 
 ## Session log — 2026-11-17 — the `thomas` password in the secrets file never matched the box
 
@@ -1822,11 +1861,12 @@ next person meets it as a passing test rather than a mystery failure.
   an unauthenticated request gets 401. The hash is bcrypt — rotate it with
   `caddy hash-password` and reload. The app's own lockout is tighter than the
   walker one on purpose — 5 failures in 15 minutes, because a handful of operator
-  accounts can each delete every account in the deployment — but there is still no
-  password-change flow for operators. `scripts/create_admin.py` creates but
-  **refuses an existing email** (`admin.EmailTaken`), so rotating an operator
-  password is delete-the-record-then-recreate — the procedure used on the VPS on
-  2026-11-16, recorded in that day's session log.
+  accounts can each delete every account in the deployment.
+- ~~**There is no operator password-change flow.**~~ Closed 2026-11-17:
+  `POST /admin/auth/password` and `/admin/ui/password` change the operator's own
+  password, and both require the current one. `scripts/create_admin.py` still
+  creates but **refuses an existing email** (`admin.EmailTaken`), so it is now the
+  recovery path for a lost password rather than the rotation path.
 - **A generated password is unrecoverable by design.** If the operator loses it
   before handover, the account must be deleted and recreated. Worth a "copy"
   button on the notice if this ever gets used by someone other than you.

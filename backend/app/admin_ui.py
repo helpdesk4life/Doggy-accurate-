@@ -153,6 +153,84 @@ async def logout():
     return response
 
 
+# --- the operator's own account -------------------------------------------
+
+
+@router.get("/password", response_class=HTMLResponse)
+async def password_page(request: Request, saved: int = 0):
+    operator = await _current(request)
+    if operator is None:
+        return _to_login()
+
+    return _page(
+        request,
+        "password",
+        {"admin": operator, "page": "password", "error": None, "saved": bool(saved)},
+    )
+
+
+@router.post("/password")
+async def password_submit(
+    request: Request,
+    current_password: str = Form(...),
+    new_password: str = Form(...),
+    confirm_password: str = Form(...),
+):
+    """Change the operator's password, then keep this browser signed in.
+
+    The confirmation field is checked here rather than in the store function
+    because it is a typing mistake, not a rule about passwords: the JSON API
+    has no second field and should not grow one.
+
+    The cookie is reissued from the new ``token_version``. Without that, the
+    change would sign out the very browser that made it, and the operator would
+    land on the login page wondering whether it worked.
+    """
+    redis = request.app.state.redis
+    operator = await _current(request)
+    if operator is None:
+        return _to_login()
+
+    def rerender(error: str):
+        return _page(
+            request,
+            "password",
+            {"admin": operator, "page": "password", "error": error, "saved": False},
+            status_code=400,
+        )
+
+    if new_password != confirm_password:
+        return rerender("The two new passwords do not match.")
+    if len(new_password) < 8:
+        return rerender("Use at least 8 characters.")
+    if len(new_password) > 128:
+        return rerender("Use at most 128 characters.")
+
+    try:
+        version = await admin.change_password(
+            redis, operator, current_password, new_password
+        )
+    except admin.LockedOut:
+        return rerender("Too many failed attempts. Try again in a few minutes.")
+    except admin.InvalidCredentials:
+        return rerender("That is not your current password.")
+    except admin.SamePassword:
+        return rerender("Choose a password different from the current one.")
+
+    token, ttl = auth.issue_admin_token(operator["admin_id"], version)
+    response = RedirectResponse("/admin/ui/password?saved=1", status_code=303)
+    response.set_cookie(
+        COOKIE,
+        token,
+        max_age=ttl,
+        httponly=True,
+        samesite="strict",
+        secure=_secure(request),
+        path="/admin",
+    )
+    return response
+
+
 @router.get("", response_class=HTMLResponse)
 async def dashboard(request: Request):
     operator = await _current(request)

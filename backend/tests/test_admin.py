@@ -130,6 +130,118 @@ def test_admin_login_locks_out_after_repeated_failures(client, operator):
     assert response.status_code == 429
 
 
+# --- changing the operator's own password -----------------------------------
+
+
+def change_password(client, token: str, current: str, new: str):
+    return client.post(
+        "/admin/auth/password",
+        json={"current_password": current, "new_password": new},
+        headers=bearer(token),
+    )
+
+
+def test_change_password_returns_a_token_that_works(client, operator):
+    token = admin_token(client)
+
+    response = change_password(client, token, ADMIN_PASSWORD, "a-brand-new-password")
+
+    assert response.status_code == 200, response.text
+    replacement = response.json()["access_token"]
+    assert client.get("/admin/users", headers=bearer(replacement)).status_code == 200
+
+
+def test_change_password_kills_the_token_that_authorised_it(client, operator):
+    token = admin_token(client)
+
+    change_password(client, token, ADMIN_PASSWORD, "a-brand-new-password")
+
+    assert client.get("/admin/users", headers=bearer(token)).status_code == 401
+
+
+def test_change_password_signs_out_every_other_session(client, operator):
+    first = admin_token(client)
+    second = admin_token(client)
+
+    change_password(client, first, ADMIN_PASSWORD, "a-brand-new-password")
+
+    assert client.get("/admin/users", headers=bearer(second)).status_code == 401
+
+
+def test_the_new_password_is_the_one_that_logs_in(client, operator):
+    token = admin_token(client)
+
+    change_password(client, token, ADMIN_PASSWORD, "a-brand-new-password")
+
+    assert (
+        client.post(
+            "/admin/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
+        ).status_code
+        == 401
+    )
+    assert (
+        client.post(
+            "/admin/auth/login",
+            json={"email": ADMIN_EMAIL, "password": "a-brand-new-password"},
+        ).status_code
+        == 200
+    )
+
+
+def test_change_password_needs_the_current_password(client, operator):
+    token = admin_token(client)
+
+    response = change_password(client, token, "not-the-password", "a-brand-new-password")
+
+    assert response.status_code == 400
+    # Nothing changed, so the original password still opens the panel.
+    assert (
+        client.post(
+            "/admin/auth/login", json={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD}
+        ).status_code
+        == 200
+    )
+
+
+def test_change_password_refuses_the_same_password(client, operator):
+    token = admin_token(client)
+
+    response = change_password(client, token, ADMIN_PASSWORD, ADMIN_PASSWORD)
+
+    assert response.status_code == 400
+    assert "different" in response.json()["detail"]
+
+
+def test_change_password_rejects_a_short_new_password(client, operator):
+    token = admin_token(client)
+
+    assert change_password(client, token, ADMIN_PASSWORD, "short").status_code == 422
+
+
+def test_change_password_needs_a_token(client, operator):
+    response = client.post(
+        "/admin/auth/password",
+        json={"current_password": ADMIN_PASSWORD, "new_password": "a-brand-new-password"},
+    )
+
+    assert response.status_code == 401
+
+
+def test_change_password_is_audited_without_the_passwords(client, operator):
+    token = admin_token(client)
+
+    replacement = change_password(
+        client, token, ADMIN_PASSWORD, "a-brand-new-password"
+    ).json()["access_token"]
+
+    entries = client.get("/admin/audit", headers=bearer(replacement)).json()["entries"]
+    assert "change_password" in [entry["action"] for entry in entries]
+
+    body = json.dumps(entries)
+    assert ADMIN_PASSWORD not in body
+    assert "a-brand-new-password" not in body
+
+
 def test_admin_routes_require_a_token(client, operator):
     for method, path in [
         ("get", "/admin/users"),
@@ -140,6 +252,7 @@ def test_admin_routes_require_a_token(client, operator):
         ("post", "/admin/invites"),
         ("get", "/admin/stats"),
         ("get", "/admin/audit"),
+        ("post", "/admin/auth/password"),
     ]:
         response = getattr(client, method)(path)
         assert response.status_code == 401, f"{method.upper()} {path}"
