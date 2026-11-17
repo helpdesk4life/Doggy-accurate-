@@ -59,11 +59,51 @@ the deployed backend image did not change all day — every box-side change was
 `.env`, Redis, or `/etc/caddy/Caddyfile`, each proven live in place, and only
 `.env` needed a container recreate.
 
-**Carried forward**: `THOMAS_USER_PASSWORD` matches no known account (delete the
-entry or explain it); still no operator password-change route (rotation is
-delete + `create_admin.py`); the email-verification decision; a reconnect
-backoff pass; accessibility; `/me`; blocks-cap atomicity; backups and
-monitoring on the box.
+**Carried forward**: ~~`THOMAS_USER_PASSWORD` matches no known account~~ —
+resolved 2026-11-17: it is the VPS *Linux* account `thomas`, not an app account,
+and it has been rotated (see **Session log — 2026-11-17**); still no operator
+password-change route (rotation is delete + `create_admin.py`); the
+email-verification decision; a reconnect backoff pass; accessibility; `/me`;
+blocks-cap atomicity; backups and monitoring on the box.
+
+## Session log — 2026-11-17 — `THOMAS_USER_PASSWORD` explained and rotated
+
+The carried-forward oddity was a misdiagnosis, not a stale secret. The entry was
+being compared against *app* accounts; it belongs to the *Linux* account. Three
+different identities in this deployment are called `thomas`, which is what made
+the entry look orphaned:
+
+| Identity | Where it is used | Credential |
+| --- | --- | --- |
+| Linux account `thomas` | `ssh thomas@207.180.240.29`, and `sudo` | `THOMAS_USER_PASSWORD` |
+| Caddy gate user `thomas` | `basic_auth` on `/admin*` | `CADDY_BASIC_AUTH_PASSWORD` |
+| Panel operator | the `/admin/ui` login form | `ADMIN_PANEL_EMAIL` + `ADMIN_PANEL_PASSWORD` |
+
+The Linux account is uid 1001, groups `sudo` and `docker`, on host `vmi1524334`
+(`207.180.240.29`). It is **not** the GitHub deploy key
+(`~/.ssh/github_dogwalk` on the box) and not any app account.
+
+**Rotated** with `passwd` over SSH — current password, then the new one twice —
+using a 32-character urlsafe value generated locally and piped, never printed.
+Verified three ways: a fresh SSH login as `thomas`, `sudo -S -k id -un`
+returning `root`, and the old password rejected (`Access denied`). The new value
+sits in `.secrets/dogwalk-secrets.env` under a comment block naming the host, the
+username, and the three identities it is *not*.
+
+**Found while doing it: `~/.ssh/authorized_keys` on the box is empty** (0 bytes,
+dated 2026-11-14 11:05). Key login as `thomas` does not work, so the password is
+the only way in from the dev machine — the `ssh thomas@207.180.240.29` check in
+`deploy/VPS.md` no longer holds. That makes this password a single point of
+failure: lose it and the only way back is the provider's console. Restoring the
+key is the obvious next step; it was left alone here because it is a separate
+access change.
+
+**Also: five secrets were printed into this session's transcript** by a `sed`
+whose redaction covered only the `THOMAS_USER_PASSWORD` line — `JWT_SECRET`,
+`ADMIN_PANEL_PASSWORD`, `CADDY_BASIC_AUTH_PASSWORD`, `NVD_API_KEY` and
+`SMTP_PASSWORD`. Same failure mode as 2026-11-16 and the same local-only
+exposure (the Vibe session log on this machine). Not rotated in this session;
+the procedures are in the 2026-11-16 log.
 
 ## Session log — 2026-11-16 — SMTP live on the VPS, priority #1 closed
 
