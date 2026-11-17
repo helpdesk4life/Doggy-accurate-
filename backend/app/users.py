@@ -265,16 +265,17 @@ async def store_refresh(redis, jti: str, user_id: str, ttl_seconds: int) -> None
 async def consume_refresh(redis, jti: str) -> str | None:
     """Read and burn in one step: a refresh token is single use.
 
-    The burned id is remembered for a day so a replay can be told apart from a
-    token that never existed. See ``replay_of_consumed_refresh``.
+    ``GETDEL`` reads and deletes in a single atomic command, so two concurrent
+    refreshes presenting the same id cannot both win. A separate ``GET`` would
+    let both callers read the value before either deleted it. The burned id is
+    remembered for a day so a replay can be told apart from a token that never
+    existed. See ``replay_of_consumed_refresh``.
     """
-    key = REFRESH_KEY.format(jti=jti)
-    user_id = await redis.get(key)
+    user_id = await redis.getdel(REFRESH_KEY.format(jti=jti))
     if user_id is None:
         return None
 
     async with redis.pipeline(transaction=True) as pipe:
-        pipe.delete(key)
         pipe.srem(REFRESH_INDEX_KEY.format(user_id=user_id), jti)
         pipe.set(
             USED_REFRESH_KEY.format(jti=jti),

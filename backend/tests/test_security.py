@@ -8,7 +8,7 @@ import fakeredis.aioredis
 import pytest
 from fastapi.testclient import TestClient
 
-from app import config, email, users
+from app import auth, config, email, users
 from app.main import create_app
 
 PASSWORD = "correct-horse-battery"
@@ -263,6 +263,47 @@ def test_replay_after_the_grace_window_revokes_every_session(client, redis_clien
     assert client.post(
         "/auth/refresh", json={"refresh_token": rotated["refresh_token"]}
     ).status_code == 401
+
+
+class _YieldingRedis:
+    """Wraps a redis client so every awaited command yields to the event loop
+    first, creating the interleaving between concurrent callers that a plain
+    in-memory call never produces."""
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    def __getattr__(self, name):
+        attr = getattr(self._inner, name)
+        if asyncio.iscoroutinefunction(attr):
+            async def wrapper(*args, **kwargs):
+                await asyncio.sleep(0)
+                return await attr(*args, **kwargs)
+
+            return wrapper
+        return attr
+
+
+def test_concurrent_refresh_of_the_same_token_is_consumed_once(redis_client):
+    """Two parties presenting the same refresh token concurrently: exactly one
+    exchange may succeed. With a separate GET-then-DELETE both could read the
+    id before either deleted it; GETDEL makes the read-and-burn one command."""
+
+    async def scenario():
+        user = await users.create_user(redis_client, EMAIL, PASSWORD)
+        pair = auth.issue_tokens(user["user_id"], 1)
+        await users.store_refresh(redis_client, pair.refresh_jti, user["user_id"], 3600)
+        racing = _YieldingRedis(redis_client)
+        results = await asyncio.gather(
+            users.consume_refresh(racing, pair.refresh_jti),
+            users.consume_refresh(racing, pair.refresh_jti),
+            users.consume_refresh(racing, pair.refresh_jti),
+        )
+        return user["user_id"], results
+
+    user_id, results = asyncio.run(scenario())
+    assert results.count(user_id) == 1
+    assert results.count(None) == 2
 
 
 # --- startup checks -------------------------------------------------------
