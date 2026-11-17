@@ -4,10 +4,12 @@ Two keys are kept in step:
 
 * ``GEO_KEY``  - a sorted set of walker ids scored by geohash, used for GEOSEARCH.
 * ``POS_KEY``  - walker id -> "lat,lon", the exact coordinates the client reported.
-* ``SEEN_KEY`` - walker id -> unix timestamp of the last fix, used by the sweeper.
+* ``SEEN_KEY`` - sorted set of walker id scored by last-fix timestamp, so the
+                 sweeper finds stale entries with one ZRANGEBYSCORE instead of
+                 reading the whole key.
 
 Redis has no per-member TTL inside a sorted set, so expiry is enforced by the sweeper
-in ``main.py``: members whose last fix is older than ``WALKER_TTL_SECONDS`` are removed.
+in ``main.py``: members whose score is older than ``WALKER_TTL_SECONDS`` are removed.
 """
 
 import time
@@ -32,7 +34,7 @@ async def upsert(redis, walker_id: str, lat: float, lon: float, now: float | Non
     async with redis.pipeline(transaction=False) as pipe:
         pipe.geoadd(GEO_KEY, (lon, lat, walker_id))
         pipe.hset(POS_KEY, walker_id, f"{lat},{lon}")
-        pipe.hset(SEEN_KEY, walker_id, now)
+        pipe.zadd(SEEN_KEY, {walker_id: now})
         await pipe.execute()
 
 
@@ -40,7 +42,7 @@ async def remove(redis, walker_id: str) -> None:
     async with redis.pipeline(transaction=False) as pipe:
         pipe.zrem(GEO_KEY, walker_id)
         pipe.hdel(POS_KEY, walker_id)
-        pipe.hdel(SEEN_KEY, walker_id)
+        pipe.zrem(SEEN_KEY, walker_id)
         await pipe.execute()
 
 
@@ -59,7 +61,12 @@ async def nearby(
     radius_m: float,
     exclude_id: str | None = None,
 ) -> list[GeoHit]:
-    """Walkers within ``radius_m`` of the point, nearest first."""
+    """Walkers within ``radius_m`` of the point, nearest first.
+
+    ``WITHCOORD`` returns each hit's coordinates with the search itself, so the
+    whole result costs one round trip instead of one GEOSEARCH plus one HGET
+    per hit.
+    """
     rows = await redis.geosearch(
         GEO_KEY,
         longitude=lon,
@@ -67,24 +74,23 @@ async def nearby(
         radius=radius_m,
         unit="m",
         withdist=True,
+        withcoord=True,
         sort="ASC",
     )
 
     hits: list[GeoHit] = []
     for row in rows:
-        member, distance = row[0], float(row[1])
+        member, distance, coords = row[0], float(row[1]), row[2]
         if isinstance(member, bytes):
             member = member.decode()
         if member == exclude_id:
             continue
-        coords = await position(redis, member)
-        if coords is None:
-            continue
+        hit_lon, hit_lat = coords  # GEOSEARCH returns (lon, lat)
         hits.append(
             GeoHit(
                 walker_id=member,
-                lat=coords[0],
-                lon=coords[1],
+                lat=float(hit_lat),
+                lon=float(hit_lon),
                 distance_m=round(distance, 1),
             )
         )
@@ -92,12 +98,14 @@ async def nearby(
 
 
 async def stale_walkers(redis, ttl_seconds: float, now: float | None = None) -> list[str]:
+    """Walkers whose last fix is older than ``ttl_seconds``.
+
+    One ZRANGEBYSCORE over the stale slice of the seen index, rather than a
+    read of every walker on every sweep.
+    """
     now = time.time() if now is None else now
-    seen = await redis.hgetall(SEEN_KEY)
-    stale: list[str] = []
-    for walker_id, raw_ts in seen.items():
-        if isinstance(walker_id, bytes):
-            walker_id = walker_id.decode()
-        if now - float(raw_ts) > ttl_seconds:
-            stale.append(walker_id)
-    return stale
+    stale = await redis.zrangebyscore(SEEN_KEY, "-inf", now - ttl_seconds)
+    return [
+        walker_id.decode() if isinstance(walker_id, bytes) else walker_id
+        for walker_id in stale
+    ]

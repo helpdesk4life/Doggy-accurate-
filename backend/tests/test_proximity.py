@@ -171,7 +171,7 @@ def test_sweep_expires_stale_walkers_and_clears_watchers():
         bob_socket.sent.clear()
 
         # Bob's last fix is older than the 30 s TTL.
-        await redis.hset(geo.SEEN_KEY, "bob", time.time() - 120)
+        await redis.zadd(geo.SEEN_KEY, {"bob": time.time() - 120})
 
         app = SimpleNamespace(state=SimpleNamespace(redis=redis, geo_redis=redis, hub=hub))
         expired = await sweep_once(app)
@@ -247,3 +247,22 @@ def test_geo_nearby_excludes_self_and_sorts_by_distance():
 
     assert [hit.walker_id for hit in hits] == ["near", "far"]
     assert hits[0].distance_m < hits[1].distance_m
+
+
+def test_geo_nearby_gets_coordinates_from_the_search_itself():
+    """WITHCOORD: a hit is returned with its coordinates even when it has no
+    POS_KEY entry, instead of being dropped by a per-hit lookup (the old N+1)."""
+
+    async def scenario():
+        redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+        # GEOADD only, no POS_KEY write.
+        await redis.geoadd(geo.GEO_KEY, (BASE_LON, BASE_LAT, "self"))
+        await redis.geoadd(geo.GEO_KEY, (BASE_LON, north(50), "near"))
+        return await geo.nearby(redis, BASE_LAT, BASE_LON, 500, exclude_id="self")
+
+    hits = asyncio.run(scenario())
+
+    assert [hit.walker_id for hit in hits] == ["near"]
+    assert 45 < hits[0].distance_m < 55
+    # Geohash precision is sub-metre, so 1e-5 degrees (~1 m) is a safe bound.
+    assert hits[0].lat == pytest.approx(north(50), abs=1e-5)

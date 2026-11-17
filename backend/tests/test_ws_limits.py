@@ -200,7 +200,7 @@ def test_geo_data_stays_on_the_volatile_geo_client(redis_client):
             # Asserted inside the socket: on disconnect the geo entry is removed.
             assert asyncio.run(redis_client.hgetall(geo.POS_KEY)) == {}
             assert asyncio.run(redis_client.zcard(geo.GEO_KEY)) == 0
-            assert asyncio.run(redis_client.hgetall(geo.SEEN_KEY)) == {}
+            assert asyncio.run(redis_client.zcard(geo.SEEN_KEY)) == 0
             # The account itself is on the persistent store.
             assert asyncio.run(redis_client.exists(users.USER_KEY.format(user_id=user_id))) == 1
 
