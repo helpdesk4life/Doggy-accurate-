@@ -243,7 +243,8 @@ async def login(credentials: AdminCredentials, request: Request) -> AdminTokenRe
     except admin.InvalidCredentials:
         raise HTTPException(status_code=401, detail="invalid email or password")
 
-    token, ttl = auth.issue_admin_token(operator["admin_id"], int(operator["token_version"]))
+    token, ttl, jti = auth.issue_admin_token(operator["admin_id"], int(operator["token_version"]))
+    await admin.register_session(redis, jti, ttl)
     await admin.record(redis, operator, "login")
     return AdminTokenResponse(
         access_token=token,
@@ -286,13 +287,28 @@ async def change_password(
             status_code=400, detail="choose a password different from the current one"
         )
 
-    token, ttl = auth.issue_admin_token(operator["admin_id"], version)
+    token, ttl, jti = auth.issue_admin_token(operator["admin_id"], version)
+    await admin.register_session(redis, jti, ttl)
     return AdminTokenResponse(
         access_token=token,
         expires_in=ttl,
         admin_id=operator["admin_id"],
         email=operator["email"],
     )
+
+
+@router.post("/auth/logout", status_code=204)
+async def logout(request: Request) -> Response:
+    """Revoke the bearer token's session server-side, not just client-side."""
+    redis = _redis(request)
+    try:
+        claims = auth.decode_token(_bearer(request), auth.ADMIN)
+    except auth.InvalidToken:
+        # Logging out with a dead token is not an error worth reporting.
+        return Response(status_code=204)
+    if claims.jti is not None:
+        await admin.revoke_session(redis, claims.jti)
+    return Response(status_code=204)
 
 
 @router.get("/users", response_model=UserPage)

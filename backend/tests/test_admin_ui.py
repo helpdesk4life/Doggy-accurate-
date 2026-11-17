@@ -13,6 +13,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from app import admin
+from app.admin_ui import COOKIE
 from app.main import create_app
 
 ADMIN_EMAIL = "operator@example.com"
@@ -115,6 +116,27 @@ def test_logout_clears_the_cookie(client, operator):
 
     assert response.status_code == 303
     assert client.get("/admin/ui", follow_redirects=False).status_code == 303
+
+
+def test_logout_revokes_the_token_server_side(client, operator):
+    """Dropping the cookie is not enough: the token itself must stop working,
+    or a stolen cookie stays valid until the token expires."""
+    login = client.post(
+        "/admin/ui/login",
+        data={"email": ADMIN_EMAIL, "password": ADMIN_PASSWORD},
+        follow_redirects=False,
+    )
+    token = login.cookies.get(COOKIE)
+    assert token
+    assert client.get("/admin/ui", follow_redirects=False).status_code == 200
+
+    client.post("/admin/ui/logout", follow_redirects=False)
+
+    # The same token, presented again after the cookie was dropped, is refused.
+    client.cookies.set(COOKIE, token)
+    response = client.get("/admin/ui", follow_redirects=False)
+    assert response.status_code == 303
+    assert response.headers["location"] == "/admin/ui/login"
 
 
 # --- pages ------------------------------------------------------------------

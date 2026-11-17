@@ -50,6 +50,7 @@ LIMITS: dict[str, Limit] = {
     # throttled like a user login rather than left open. The HTML form and the
     # JSON endpoint are separate paths and each gets its own bucket.
     "/admin/auth/login": Limit(10, 60),
+    "/admin/auth/logout": Limit(30, 60),
     "/admin/ui/login": Limit(10, 60),
     # The walk socket. The http middleware below never sees websocket scope, so
     # app/ws.py runs this bucket itself before accepting the handshake. It bounds

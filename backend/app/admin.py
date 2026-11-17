@@ -13,6 +13,9 @@ Keys:
 * ``dogwalk:admin:loginfail:<email>`` - hash: client address -> failed-login
                                         count, so a lockout only locks the address
                                         that produced the failures
+* ``dogwalk:admin:session:<jti>``     - a live admin token id, with a TTL, so logout
+                                        can revoke the one token instead of only
+                                        dropping the cookie
 * ``dogwalk:admin:audit``             - capped list of JSON audit entries
 
 Admins are created with ``scripts/create_admin.py`` rather than through an
@@ -33,6 +36,7 @@ logger = logging.getLogger(__name__)
 ADMIN_KEY = "dogwalk:admins:{admin_id}"
 ADMIN_EMAIL_KEY = "dogwalk:admins:email:{email}"
 LOGIN_FAIL_KEY = "dogwalk:admin:loginfail:{email}"
+SESSION_KEY = "dogwalk:admin:session:{jti}"
 AUDIT_KEY = "dogwalk:admin:audit"
 
 # Tighter than the walker lockout. There are a handful of admin accounts and
@@ -166,14 +170,28 @@ async def change_password(
     return int(results[1])
 
 
+async def register_session(redis, jti: str, ttl_seconds: int) -> None:
+    """Remember a live admin token id, so logout can revoke it server-side."""
+    await redis.set(SESSION_KEY.format(jti=jti), "1", ex=ttl_seconds)
+
+
+async def revoke_session(redis, jti: str) -> None:
+    """Drop one admin token id. Tokens issued before sessions existed have no
+    ``jti`` and are refused outright; their holders simply sign in again."""
+    await redis.delete(SESSION_KEY.format(jti=jti))
+
+
 async def resolve_admin_token(redis, token: str) -> dict:
     """Turn a bearer token into the admin it belongs to, or raise InvalidToken.
 
     The type check is what keeps a walker token out: ``decode_token`` refuses
     anything whose ``typ`` is not ``admin``, so there is no path from a stolen
-    user session to this API.
+    user session to this API. The session check is what makes logout real:
+    a token whose session key is gone is refused even before its expiry.
     """
     claims = auth.decode_token(token, auth.ADMIN)
+    if claims.jti is None or not await redis.exists(SESSION_KEY.format(jti=claims.jti)):
+        raise auth.InvalidToken("admin session has been revoked")
     admin = await get_by_id(redis, claims.user_id)
     if admin is None:
         raise auth.InvalidToken("unknown admin")

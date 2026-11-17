@@ -14,7 +14,7 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from app import admin, ratelimit
+from app import admin, auth, ratelimit
 from app.main import create_app
 
 ADMIN_EMAIL = "operator@example.com"
@@ -95,6 +95,25 @@ def test_admin_login_issues_no_refresh_token(client, operator):
     ).json()
 
     assert "refresh_token" not in body
+
+
+def test_admin_logout_revokes_the_token_server_side(client, operator):
+    token = admin_token(client)
+    assert client.get("/admin/users", headers=bearer(token)).status_code == 200
+
+    assert client.post("/admin/auth/logout", headers=bearer(token)).status_code == 204
+    assert client.get("/admin/users", headers=bearer(token)).status_code == 401
+
+    # A fresh login still works.
+    assert client.get("/admin/users", headers=bearer(admin_token(client))).status_code == 200
+
+
+def test_admin_token_without_a_registered_session_is_refused(client, operator):
+    """A token minted without going through login - e.g. one issued before
+    sessions were tracked - has no session key and is refused outright."""
+    token, _, _ = auth.issue_admin_token(operator["admin_id"], int(operator["token_version"]))
+
+    assert client.get("/admin/users", headers=bearer(token)).status_code == 401
 
 
 def test_admin_login_rejects_a_wrong_password(client, operator):

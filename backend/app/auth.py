@@ -147,10 +147,16 @@ def issue_tokens(user_id: str, version: int) -> TokenPair:
     )
 
 
-def issue_admin_token(admin_id: str, version: int) -> tuple[str, int]:
-    """A single short-lived token. No refresh pair: see ``config``."""
+def issue_admin_token(admin_id: str, version: int) -> tuple[str, int, str]:
+    """A single short-lived token, plus the session id it belongs to.
+
+    No refresh pair: see ``config``. The ``jti`` is registered in Redis at login
+    (``admin.register_session``) and checked on every admin request, so a logout
+    can revoke exactly this token server-side instead of only dropping the cookie.
+    """
     ttl = config.settings.admin_token_ttl_seconds
-    return _encode(admin_id, ADMIN, version, ttl, None), ttl
+    jti = uuid.uuid4().hex
+    return _encode(admin_id, ADMIN, version, ttl, jti), ttl, jti
 
 
 def issue_password_change_token(user_id: str, version: int) -> tuple[str, int]:

@@ -142,7 +142,8 @@ async def login_submit(
             status_code=401,
         )
 
-    token, ttl = auth.issue_admin_token(operator["admin_id"], int(operator["token_version"]))
+    token, ttl, jti = auth.issue_admin_token(operator["admin_id"], int(operator["token_version"]))
+    await admin.register_session(redis, jti, ttl)
     await admin.record(redis, operator, "login")
 
     response = RedirectResponse("/admin/ui", status_code=303)
@@ -159,7 +160,21 @@ async def login_submit(
 
 
 @router.post("/logout")
-async def logout():
+async def logout(request: Request):
+    """Revoke the token server-side as well as dropping the cookie.
+
+    Without the delete a stolen cookie would stay valid until the token expires,
+    and "log out" would be cosmetic.
+    """
+    token = request.cookies.get(COOKIE)
+    if token:
+        try:
+            claims = auth.decode_token(token, auth.ADMIN)
+        except auth.InvalidToken:
+            claims = None
+        if claims is not None and claims.jti is not None:
+            await admin.revoke_session(request.app.state.redis, claims.jti)
+
     response = RedirectResponse("/admin/ui/login", status_code=303)
     response.delete_cookie(COOKIE, path="/admin")
     return response
@@ -233,7 +248,8 @@ async def password_submit(
     except admin.SamePassword:
         return rerender("Choose a password different from the current one.")
 
-    token, ttl = auth.issue_admin_token(operator["admin_id"], version)
+    token, ttl, jti = auth.issue_admin_token(operator["admin_id"], version)
+    await admin.register_session(redis, jti, ttl)
     response = RedirectResponse("/admin/ui/password?saved=1", status_code=303)
     response.set_cookie(
         COOKIE,
