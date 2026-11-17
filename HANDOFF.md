@@ -24,6 +24,74 @@ log below were each true on its own branch; the current gate is under
 **Android tests**. PR #13 (the dependency-vulnerability scanners) merged as
 `0906161`, with docs follow-ups on top. Read **Session log — 2026-11-16** first.
 
+**The security hardening pass is merged.** On 2026-11-17, PRs #17, #18 and #19
+landed the review fixes: HSTS on the Caddy sites, rate/size limits on `/ws/walk`,
+atomic refresh-token consumption, CSP on the admin panel, a production check on
+`PUBLIC_BASE_URL`, duplicate-socket replacement, live geo data moved to a
+non-persistent `redis-geo` (`GEO_REDIS_URL`), per-address login lockouts, a
+capped used-invite set, server-side admin logout revocation, and the GEOSEARCH /
+sweeper performance fixes. See **Session log — 2026-11-17 — security hardening
+pass** at the top of the log. The backend image changes, so redeploy the VPS with
+`docker compose up -d redis redis-geo backend`.
+
+## Session log — 2026-11-17 — security hardening pass (PRs #17, #18, #19)
+
+A full read-only review of the repo (backend, Android, iOS slice, deploy config),
+then fixes — each verified by unit tests, ruff, and the CI run on its PR. All
+three PRs are merged to `main`, and the CI runs on `main` after each merge are
+green (backend tests, Android tests and lint, e2e against real Redis).
+
+### What landed
+
+- **HSTS** on both production Caddy sites (`deploy/Caddyfile`):
+  `Strict-Transport-Security: max-age=31536000; includeSubDomains`.
+- **`/ws/walk` limits** (`app/ws.py`, `app/ratelimit.py`, `app/main.py`): per-IP
+  handshake bucket (20/min, checked before `accept()`, close 4429), 4 KiB frame
+  cap (close 1009), at most one evaluated location fix per second per connection,
+  rapid fixes coalesced newest-wins. The first version dropped rapid fixes and
+  the e2e suite caught it (`B receives PROXIMITY_CLEAR at 800 m`); the follow-up
+  commit coalesces instead.
+- **Atomic refresh consumption** (`app/users.py`): `GETDEL` instead of
+  GET-then-MULTI/EXEC-DELETE, so two concurrent refreshes with the same `jti`
+  cannot both win.
+- **CSP + `X-Frame-Options: DENY`** on `/admin/ui` (`app/main.py`) — strict,
+  because the panel has no JavaScript; API responses unchanged.
+- **`PUBLIC_BASE_URL` startup check** (`app/config.py`): outside development,
+  boot is refused unless it is the deployment's own `https://` URL.
+- **Duplicate walk sockets** (`app/ws.py`): the old socket is closed (4409), and
+  disconnect cleanup removes the hub entry / geo position only when the hub still
+  points at its own connection.
+- **Live positions off disk**: new `redis-geo` compose service with persistence
+  off and no published port; `GEO_REDIS_URL` points the backend at it via
+  `app.state.geo_redis`. Without `GEO_REDIS_URL` both clients are the same, so
+  dev and tests are unchanged. `deploy/VPS.md` documents the LUKS recommendation
+  for the persistent volume (password hashes, SMTP password, audit log) and the
+  new `docker compose up -d redis redis-geo backend` command.
+- **Lockouts per client address**: the login lockout (walker + admin, API +
+  panel) and the reset-attempt counter are hashes keyed by `X-Forwarded-For`, so
+  an attacker can only lock their own address, not the account owner's.
+- **Used-invite set capped** at 1000 (`app/invites.py`, ZSET + `ZREMRANGEBYRANK`).
+- **Admin logout revokes server-side** (PR #19): admin tokens carry a `jti`
+  registered at login (`dogwalk:admin:session:<jti>`) and checked on every admin
+  request; `/admin/ui/logout` and the new `POST /admin/auth/logout` revoke it.
+- **Perf** (PR #18): `GEOSEARCH ... WITHCOORD` (one round trip per proximity
+  evaluation instead of 1+N) and `SEEN_KEY` as a ZSET, so the sweeper is one
+  `ZRANGEBYSCORE` instead of `HGETALL` over every walker.
+
+### Verification
+
+`python -m pytest -q` in `backend/`: 276 passed on the last branch (253 before
+the pass). `ruff check --select F,E9 app/ tests/ scripts/` clean. CI green on
+PR #17, #18, #19 and on `main` after each merge.
+
+### Deployment note
+
+On the VPS, once: `docker compose up -d redis redis-geo backend` (was
+`redis backend`). No `.env` change needed — `GEO_REDIS_URL` is set by the compose
+file itself. Admin sessions issued before PR #19 are invalidated once; sign in
+again. `sudo caddy validate --config /etc/caddy/Caddyfile` before
+`systemctl reload caddy` (Caddy keeps the previous config on an invalid file).
+
 ## Session log — 2026-11-16 — the day in one place
 
 Five threads, all closed on the same day. Each has its own detailed log below
@@ -1925,6 +1993,15 @@ next person meets it as a passing test rather than a mystery failure.
   archive and the client makes range requests against it. The style has no
   symbol layers and no `glyphs` key on purpose; see the glyph note under
   **Environment facts**. `ios/` still has no style file.
+- **Flash ids land in the Caddy access log for up to 120 s.** The invite codes
+  and one-time passwords themselves never do — only the single-use Redis key id
+  that fetches them, valid for 120 s and deleted on read. Accepted: the log is
+  readable only by the operator, and the alternative (POST-body round trips)
+  costs more than it buys at this scale.
+- **`dev_server.py` and the README's no-Docker instructions bind `0.0.0.0:8000`.**
+  Development only: without Caddy there is no TLS and `X-Forwarded-For` is
+  spoofable, so the rate limiter can be bypassed. Never expose that port outside
+  a dev machine.
 
 ## Environment facts worth not rediscovering
 

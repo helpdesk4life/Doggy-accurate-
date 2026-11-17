@@ -55,6 +55,8 @@ python -m venv .venv
 
 `GET /health` returns the active radius and TTL.
 
+The walk socket is throttled in code: 20 handshakes/minute per client IP (checked before the handshake is accepted), frames capped at 4 KiB, and at most one location fix evaluated per second per connection (rapid fixes are coalesced, newest wins).
+
 ### Configuration
 
 | Variable | Default | Meaning |

@@ -80,3 +80,14 @@ Do not report these — they are deliberate and already gated:
   (`android/app/src/debug/`). Release builds use the system store only.
 - Redis and the plaintext backend published on `127.0.0.1` only in
   `docker-compose.yml`; Caddy on 8443 is the only external entry point.
+- Live GPS positions never reach disk: the geo index lives on `redis-geo`
+  (`GEO_REDIS_URL` in `backend/docker-compose.yml`), which runs with persistence
+  off and no published port. The persistent Redis AOF does hold accounts, the
+  SMTP password and the audit log — protect the disk (LUKS) accordingly; see
+  `deploy/VPS.md`.
+- `/ws/walk` is throttled in code, not configuration: 20 handshakes/min per IP
+  before the handshake is accepted (close 4429), frames capped at 4 KiB (close
+  1009), one evaluated location fix per second per connection.
+- Admin sessions are revocable server-side: every admin token carries a `jti`
+  registered in Redis at login; logout (`/admin/ui/logout`, `POST
+  /admin/auth/logout`) deletes it. HSTS is set in `deploy/Caddyfile`.
