@@ -25,6 +25,11 @@ class Settings:
     environment: str = os.getenv("DOGWALK_ENV", "development")
 
     redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    # A separate Redis for the disposable geo index. Empty means "same instance
+    # as REDIS_URL". Point it at an instance with persistence off: live GPS
+    # positions are the most sensitive data in the deployment and must not be
+    # written to the AOF of the persistent store. See docker-compose.yml.
+    geo_redis_url: str = os.getenv("GEO_REDIS_URL", "")
     proximity_radius_m: float = float(os.getenv("PROXIMITY_RADIUS_M", "500"))
     walker_ttl_seconds: float = float(os.getenv("WALKER_TTL_SECONDS", "30"))
     sweep_interval_seconds: float = float(os.getenv("SWEEP_INTERVAL_SECONDS", "5"))
@@ -123,6 +128,21 @@ class Settings:
                 f"HS256 needs at least {MIN_JWT_SECRET_BYTES}. "
                 "Generate one with: python -c \"import secrets; print(secrets.token_urlsafe(48))\""
             )
+
+        if not self.is_development:
+            # Password-reset links are built from this, so a wrong value sends
+            # working reset links somewhere that is not this deployment - or over
+            # plain http. Development keeps the localhost default.
+            base = self.public_base_url.strip().lower()
+            if not base.startswith("https://") or base.startswith(
+                ("https://localhost", "https://127.0.0.1", "https://[::1]")
+            ):
+                raise RuntimeError(
+                    f"PUBLIC_BASE_URL is {self.public_base_url!r} and DOGWALK_ENV is "
+                    f"{self.environment!r}. Reset links are built from it, so outside "
+                    "development it must be the https URL this deployment is actually "
+                    "served on, e.g. https://backend.example.com."
+                )
 
         if self.distance_quantum_m < 0 or self.bearing_quantum_deg < 0:
             raise RuntimeError(

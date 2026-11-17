@@ -61,6 +61,7 @@ python -m venv .venv
 | --- | --- | --- |
 | `DOGWALK_ENV` | `development` | Deployment name. Anything outside `development`/`dev`/`local`/`test` gets the strict startup checks |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis connection |
+| `GEO_REDIS_URL` | _(empty = same as `REDIS_URL`)_ | Separate Redis for the disposable geo index. Point it at an instance with persistence off so live GPS positions never reach disk |
 | `PROXIMITY_RADIUS_M` | `500` | Alert radius in metres |
 | `WALKER_TTL_SECONDS` | `30` | A walker with no fix for this long is dropped |
 | `SWEEP_INTERVAL_SECONDS` | `5` | How often the sweeper runs |

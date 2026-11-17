@@ -27,6 +27,11 @@ backend.thomasfeyens.be {
 	# outside, which is the position the first deployment ended in.
 	log
 
+	# Caddy does not add HSTS on its own. Without it a browser that has seen the
+	# site once can still be talked into a plain-http request, which is where the
+	# bearer tokens and the admin cookie would cross unencrypted.
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
+
 	# Second gate on the admin panel, before the app's own login. The hash is
 	# bcrypt (caddy hash-password); rotate it there and reload.
 	basic_auth /admin* {
@@ -50,6 +55,10 @@ maps.thomasfeyens.be {
 	# "Caddy answered 404 because /srv/maps was empty" from "Caddy answered 403
 	# because the caddy user cannot read the file".
 	log
+
+	# Same HSTS as the backend site: this host is TLS-only too, and the map
+	# archive is not worth a downgrade for either.
+	header Strict-Transport-Security "max-age=31536000; includeSubDomains"
 
 	# MapLibre Native mishandles a 304 on glyphs and renders no text at all, so
 	# the font and sprite responses must never carry a cache validator. Without

@@ -26,7 +26,17 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from app import account_requests, admin, auth, config, email, invites, smtp_settings, users
+from app import (
+    account_requests,
+    admin,
+    auth,
+    config,
+    email,
+    invites,
+    ratelimit,
+    smtp_settings,
+    users,
+)
 from app.routes_admin import EMAIL_PATTERN
 
 router = APIRouter(prefix="/admin/ui", tags=["admin-ui"], include_in_schema=False)
@@ -120,7 +130,9 @@ async def login_submit(
 ):
     redis = request.app.state.redis
     try:
-        operator = await admin.authenticate(redis, email, password)
+        operator = await admin.authenticate(
+            redis, email, password, client_ip=ratelimit.client_identity(request)
+        )
     except (admin.InvalidCredentials, admin.LockedOut):
         # One message for both, and no hint about which half was wrong.
         return _page(
@@ -208,7 +220,11 @@ async def password_submit(
 
     try:
         version = await admin.change_password(
-            redis, operator, current_password, new_password
+            redis,
+            operator,
+            current_password,
+            new_password,
+            client_ip=ratelimit.client_identity(request),
         )
     except admin.LockedOut:
         return rerender("Too many failed attempts. Try again in a few minutes.")
@@ -246,7 +262,7 @@ async def dashboard(request: Request):
             "page": "dashboard",
             "accounts": await users.count_users(redis),
             "invites_unused": await invites.available(redis),
-            "invites_used": int(await redis.scard(invites.USED_KEY)),
+            "invites_used": await invites.used_count(redis),
             "requests_pending": await account_requests.count(redis),
             "entries": await admin.recent(redis, 10),
         },
@@ -412,7 +428,7 @@ async def invites_page(request: Request, flash: str | None = None):
             "admin": operator,
             "page": "invites",
             "codes": sorted(invites.format_code(code) for code in unused),
-            "used": int(await redis.scard(invites.USED_KEY)),
+            "used": await invites.used_count(redis),
             "minted": minted,
         },
     )

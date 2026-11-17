@@ -8,7 +8,7 @@ import fakeredis.aioredis
 import pytest
 from fastapi.testclient import TestClient
 
-from app import config, email, users
+from app import admin, auth, config, email, users
 from app.main import create_app
 
 PASSWORD = "correct-horse-battery"
@@ -265,6 +265,136 @@ def test_replay_after_the_grace_window_revokes_every_session(client, redis_clien
     ).status_code == 401
 
 
+class _YieldingRedis:
+    """Wraps a redis client so every awaited command yields to the event loop
+    first, creating the interleaving between concurrent callers that a plain
+    in-memory call never produces."""
+
+    def __init__(self, inner):
+        self._inner = inner
+
+    def __getattr__(self, name):
+        attr = getattr(self._inner, name)
+        if asyncio.iscoroutinefunction(attr):
+            async def wrapper(*args, **kwargs):
+                await asyncio.sleep(0)
+                return await attr(*args, **kwargs)
+
+            return wrapper
+        return attr
+
+
+def test_concurrent_refresh_of_the_same_token_is_consumed_once(redis_client):
+    """Two parties presenting the same refresh token concurrently: exactly one
+    exchange may succeed. With a separate GET-then-DELETE both could read the
+    id before either deleted it; GETDEL makes the read-and-burn one command."""
+
+    async def scenario():
+        user = await users.create_user(redis_client, EMAIL, PASSWORD)
+        pair = auth.issue_tokens(user["user_id"], 1)
+        await users.store_refresh(redis_client, pair.refresh_jti, user["user_id"], 3600)
+        racing = _YieldingRedis(redis_client)
+        results = await asyncio.gather(
+            users.consume_refresh(racing, pair.refresh_jti),
+            users.consume_refresh(racing, pair.refresh_jti),
+            users.consume_refresh(racing, pair.refresh_jti),
+        )
+        return user["user_id"], results
+
+    user_id, results = asyncio.run(scenario())
+    assert results.count(user_id) == 1
+    assert results.count(None) == 2
+
+
+def test_login_lockout_only_locks_the_attacking_address(client):
+    """The lockout counter is per (account, address): an attacker who burns the
+    budget cannot lock the owner out from their own device."""
+    register(client)
+
+    attacker = {"X-Forwarded-For": "203.0.113.9"}
+    for _ in range(users.MAX_LOGIN_FAILURES):
+        response = client.post(
+            "/auth/login",
+            json={"email": EMAIL, "password": "wrong-password"},
+            headers=attacker,
+        )
+        assert response.status_code == 401
+
+    locked = client.post(
+        "/auth/login",
+        json={"email": EMAIL, "password": "wrong-password"},
+        headers=attacker,
+    )
+    assert locked.status_code == 429
+
+    owner = client.post(
+        "/auth/login",
+        json={"email": EMAIL, "password": PASSWORD},
+        headers={"X-Forwarded-For": "198.51.100.7"},
+    )
+    assert owner.status_code == 200
+
+
+def test_admin_login_lockout_only_locks_the_attacking_address(client, redis_client):
+    asyncio.run(admin.create_admin(redis_client, "op@example.com", PASSWORD))
+
+    attacker = {"X-Forwarded-For": "203.0.113.9"}
+    for _ in range(admin.MAX_LOGIN_FAILURES):
+        response = client.post(
+            "/admin/auth/login",
+            json={"email": "op@example.com", "password": "wrong-password"},
+            headers=attacker,
+        )
+        assert response.status_code == 401
+
+    assert (
+        client.post(
+            "/admin/auth/login",
+            json={"email": "op@example.com", "password": "wrong-password"},
+            headers=attacker,
+        ).status_code
+        == 429
+    )
+
+    ok = client.post(
+        "/admin/auth/login",
+        json={"email": "op@example.com", "password": PASSWORD},
+        headers={"X-Forwarded-For": "198.51.100.7"},
+    )
+    assert ok.status_code == 200
+
+
+def test_reset_attempts_are_counted_per_address(client, sender):
+    register(client)
+    client.post("/auth/password-reset/request", json={"email": EMAIL})
+    code = sender.last_code()
+    wrong = "000000" if code != "000000" else "111111"
+
+    attacker = {"X-Forwarded-For": "203.0.113.9"}
+    for _ in range(users.RESET_MAX_ATTEMPTS):
+        client.post(
+            "/auth/password-reset/confirm",
+            json={"email": EMAIL, "code": wrong, "password": NEW_PASSWORD},
+            headers=attacker,
+        )
+
+    # The attacker's address has no budget left, not even for the real code.
+    refused = client.post(
+        "/auth/password-reset/confirm",
+        json={"email": EMAIL, "code": code, "password": NEW_PASSWORD},
+        headers=attacker,
+    )
+    assert refused.status_code == 400
+
+    # The owner's address still has its own budget and the real code works.
+    ok = client.post(
+        "/auth/password-reset/confirm",
+        json={"email": EMAIL, "code": code, "password": NEW_PASSWORD},
+        headers={"X-Forwarded-For": "198.51.100.7"},
+    )
+    assert ok.status_code == 204
+
+
 # --- startup checks -------------------------------------------------------
 
 
@@ -279,6 +409,7 @@ def test_production_accepts_a_real_secret():
     settings = config.Settings(
         environment="production",
         jwt_secret="a" * 48,
+        public_base_url="https://backend.example.com",
         # The email guard is a separate check; see the tests below.
         allow_logging_email=True,
     )
@@ -290,6 +421,7 @@ def test_production_refuses_to_log_reset_codes():
     settings = config.Settings(
         environment="production",
         jwt_secret="a" * 48,
+        public_base_url="https://backend.example.com",
     )
 
     with pytest.raises(RuntimeError, match="EMAIL_SENDER"):
@@ -300,10 +432,39 @@ def test_production_accepts_an_acknowledged_logging_sender():
     settings = config.Settings(
         environment="production",
         jwt_secret="a" * 48,
+        public_base_url="https://backend.example.com",
         allow_logging_email=True,
     )
 
     settings.validate()
+
+
+def test_production_refuses_a_plain_http_base_url():
+    settings = config.Settings(
+        environment="production",
+        jwt_secret="a" * 48,
+        public_base_url="http://backend.example.com",
+        allow_logging_email=True,
+    )
+
+    with pytest.raises(RuntimeError, match="PUBLIC_BASE_URL"):
+        settings.validate()
+
+
+def test_production_refuses_a_localhost_base_url():
+    settings = config.Settings(
+        environment="production",
+        jwt_secret="a" * 48,
+        public_base_url="https://localhost:8000",
+        allow_logging_email=True,
+    )
+
+    with pytest.raises(RuntimeError, match="PUBLIC_BASE_URL"):
+        settings.validate()
+
+
+def test_development_tolerates_the_default_base_url():
+    config.Settings(environment="development", jwt_secret=config.DEV_JWT_SECRET).validate()
 
 
 def test_development_tolerates_the_logging_sender():
@@ -348,3 +509,20 @@ def test_auth_responses_are_not_cacheable(client):
 
     assert response.headers["cache-control"] == "no-store"
     assert response.headers["x-content-type-options"] == "nosniff"
+
+
+def test_admin_ui_pages_carry_a_strict_csp(client):
+    response = client.get("/admin/ui/login")
+
+    assert response.status_code == 200
+    csp = response.headers["content-security-policy"]
+    assert "default-src 'none'" in csp
+    assert "form-action 'self'" in csp
+    assert "frame-ancestors 'none'" in csp
+    assert response.headers["x-frame-options"] == "DENY"
+
+
+def test_api_responses_do_not_carry_a_csp(client):
+    response = client.post("/auth/login", json={"email": EMAIL, "password": PASSWORD})
+
+    assert "content-security-policy" not in response.headers

@@ -34,14 +34,15 @@ async def sweep_once(app: FastAPI) -> list[str]:
     drive expiry deterministically instead of sleeping.
     """
     redis = app.state.redis
+    geo_redis = app.state.geo_redis
     hub: Hub = app.state.hub
 
-    stale = await geo.stale_walkers(redis, config.settings.walker_ttl_seconds)
+    stale = await geo.stale_walkers(geo_redis, config.settings.walker_ttl_seconds)
     for walker_id in stale:
-        await geo.remove(redis, walker_id)
+        await geo.remove(geo_redis, walker_id)
 
     for connection in hub.all():
-        coords = await geo.position(redis, connection.walker_id)
+        coords = await geo.position(geo_redis, connection.walker_id)
         if coords is None:
             continue
         await refresh_neighborhood(
@@ -51,6 +52,7 @@ async def sweep_once(app: FastAPI) -> list[str]:
             coords[0],
             coords[1],
             config.settings.proximity_radius_m,
+            geo_redis=geo_redis,
         )
 
     return stale
@@ -71,6 +73,7 @@ async def sweep_loop(app: FastAPI) -> None:
 
 def create_app(
     redis_client=None,
+    geo_redis_client=None,
     rate_limit: bool | None = None,
     invite_required: bool | None = None,
 ) -> FastAPI:
@@ -84,6 +87,20 @@ def create_app(
             config.settings.redis_url,
             decode_responses=True,
         )
+        # The geo index is disposable (a walker with no fix for WALKER_TTL_SECONDS
+        # is dropped), so when GEO_REDIS_URL is set it gets its own instance - one
+        # without persistence, so live positions never reach the AOF of the
+        # persistent store. Without GEO_REDIS_URL both share one client, which is
+        # what the tests and the no-Docker dev server do.
+        if geo_redis_client is not None:
+            app.state.geo_redis = geo_redis_client
+        elif config.settings.geo_redis_url:
+            app.state.geo_redis = aioredis.from_url(
+                config.settings.geo_redis_url,
+                decode_responses=True,
+            )
+        else:
+            app.state.geo_redis = app.state.redis
         app.state.hub = Hub()
         # Reads the admin panel's saved configuration, so a provider set up there
         # survives a restart. Falls back to EMAIL_SENDER when nothing is saved.
@@ -103,6 +120,13 @@ def create_app(
             if closer is not None:
                 with contextlib.suppress(Exception):
                     await closer()
+            if app.state.geo_redis is not app.state.redis:
+                geo_closer = getattr(app.state.geo_redis, "aclose", None) or getattr(
+                    app.state.geo_redis, "close", None
+                )
+                if geo_closer is not None:
+                    with contextlib.suppress(Exception):
+                        await geo_closer()
 
     app = FastAPI(title="DogWalk proximity backend", lifespan=lifespan)
     app.include_router(auth_router)
@@ -113,6 +137,10 @@ def create_app(
 
     if rate_limit is None:
         rate_limit = config.settings.rate_limit_enabled
+    # The http middleware only covers http scope, so the websocket handler reads
+    # this flag and runs its own bucket in app/ws.py. Stored on app.state rather
+    # than read from settings so a test can turn the limiter off for both.
+    app.state.rate_limit = rate_limit
     if rate_limit:
         ratelimit.install(app)
 
@@ -134,6 +162,15 @@ def create_app(
         # gets the same treatment.
         if request.url.path.startswith(("/auth", "/admin")):
             response.headers["Cache-Control"] = "no-store"
+        if request.url.path.startswith("/admin/ui"):
+            # The panel is server-rendered with no JavaScript at all, so the
+            # policy can be strict: no scripts, no frames, forms only to self.
+            # style-src needs 'unsafe-inline' for the templates' style attributes.
+            response.headers["Content-Security-Policy"] = (
+                "default-src 'none'; style-src 'self' 'unsafe-inline'; "
+                "form-action 'self'; base-uri 'none'; frame-ancestors 'none'"
+            )
+            response.headers["X-Frame-Options"] = "DENY"
         return response
 
     if config.settings.jwt_secret_is_default:

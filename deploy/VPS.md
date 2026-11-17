@@ -20,6 +20,12 @@ likely to bite:
    not save you.
 3. **The `docker` group is root.** Membership means you can mount the host
    filesystem into a container. It is a convenience, not a privilege boundary.
+4. **The disk is not encrypted unless you make it so.** The persistent Redis runs
+   with AOF, so its volume on disk holds password hashes, the SMTP password and
+   the audit log. Live GPS positions do not land there: the geo index runs on
+   `redis-geo`, which has persistence off. Everything else does - enable LUKS on
+   the data disk at provisioning time, or accept that a stolen disk is a stolen
+   user database.
 
 Keep your provider's web console open in a second tab for the whole of steps 1-3.
 It is the only way back in if SSH stops working.
@@ -237,12 +243,15 @@ ALLOW_LOGGING_EMAIL=1
 EOF
 chmod 600 .env
 
-docker compose up -d redis backend
+docker compose up -d redis redis-geo backend
 docker compose ps
 ```
 
-Note `redis backend` — deliberately not `up -d`. The compose `caddy` service is
-the *local* one with `tls internal`; on this box the host Caddy does TLS.
+Note `redis redis-geo backend` — deliberately not `up -d`. The compose `caddy` service is
+the *local* one with `tls internal`; on this box the host Caddy does TLS. `redis-geo`
+is the volatile geo index (`GEO_REDIS_URL` points the backend at it): no AOF, no
+volume, so live positions never touch disk. `redis` keeps AOF, because accounts
+must survive a restart.
 
 `DOGWALK_ENV=production` turns on the strict startup checks. The backend will
 refuse to boot if `JWT_SECRET` is still the public development value, or if

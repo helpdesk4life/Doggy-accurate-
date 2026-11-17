@@ -12,7 +12,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from app import account_requests, auth, config, email, invites, users
+from app import account_requests, auth, config, email, invites, ratelimit, users
 
 logger = logging.getLogger(__name__)
 
@@ -170,7 +170,12 @@ async def request_account(body: AccountRequest, request: Request) -> Response:
 async def login(credentials: Credentials, request: Request) -> LoginResponse:
     redis = _redis(request)
     try:
-        user = await users.authenticate(redis, credentials.email, credentials.password)
+        user = await users.authenticate(
+            redis,
+            credentials.email,
+            credentials.password,
+            client_ip=ratelimit.client_identity(request),
+        )
     except users.LockedOut:
         raise HTTPException(status_code=429, detail="too many failed attempts")
     except users.InvalidCredentials:
@@ -336,7 +341,9 @@ async def request_password_reset(body: PasswordResetRequest, request: Request) -
 @router.post("/password-reset/confirm", status_code=204)
 async def confirm_password_reset(body: PasswordResetConfirm, request: Request) -> Response:
     redis = _redis(request)
-    user_id = await users.consume_reset_code(redis, body.email, body.code)
+    user_id = await users.consume_reset_code(
+        redis, body.email, body.code, client_ip=ratelimit.client_identity(request)
+    )
     if user_id is None:
         raise HTTPException(status_code=400, detail="invalid or expired reset code")
 

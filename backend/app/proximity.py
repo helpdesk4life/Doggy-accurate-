@@ -12,6 +12,7 @@ async def refresh_neighborhood(
     lat: float,
     lon: float,
     radius_m: float,
+    geo_redis=None,
 ) -> list[geo.GeoHit]:
     """Recompute one walker's neighbours and push the result to that walker.
 
@@ -27,7 +28,10 @@ async def refresh_neighborhood(
     marker. The filter is symmetric (see ``app.blocks``), which means a walker
     who blocked someone also stops appearing on that person's map.
     """
-    hits = await geo.nearby(redis, lat, lon, radius_m, exclude_id=walker_id)
+    # Blocks live on the persistent store, positions on the geo one; the two are
+    # the same client unless GEO_REDIS_URL splits them.
+    geo_redis = geo_redis if geo_redis is not None else redis
+    hits = await geo.nearby(geo_redis, lat, lon, radius_m, exclude_id=walker_id)
 
     hidden = await blocks.hidden_for(redis, walker_id)
     if hidden:
@@ -65,6 +69,7 @@ async def update_walker(
     lat: float,
     lon: float,
     radius_m: float,
+    geo_redis=None,
 ) -> list[geo.GeoHit]:
     """Apply a new fix and refresh everyone whose view of the world changed.
 
@@ -75,25 +80,36 @@ async def update_walker(
     connection = hub.get(walker_id)
     previous = set(connection.last_neighbors) if connection else set()
 
-    hits = await refresh_neighborhood(redis, hub, walker_id, lat, lon, radius_m)
+    hits = await refresh_neighborhood(
+        redis, hub, walker_id, lat, lon, radius_m, geo_redis=geo_redis
+    )
     current = {hit.walker_id for hit in hits}
 
     if connection is not None:
         connection.last_neighbors = current
 
     for other_id in (previous | current) - {walker_id}:
-        coords = await geo.position(redis, other_id)
+        coords = await geo.position(
+            geo_redis if geo_redis is not None else redis, other_id
+        )
         if coords is None:
             continue
-        await refresh_neighborhood(redis, hub, other_id, coords[0], coords[1], radius_m)
+        await refresh_neighborhood(
+            redis, hub, other_id, coords[0], coords[1], radius_m, geo_redis=geo_redis
+        )
 
     return hits
 
 
-async def refresh_watchers(redis, hub: Hub, watcher_ids: set[str], radius_m: float) -> None:
+async def refresh_watchers(
+    redis, hub: Hub, watcher_ids: set[str], radius_m: float, geo_redis=None
+) -> None:
     """Re-evaluate the given walkers, e.g. after someone they were watching disappeared."""
+    geo_redis = geo_redis if geo_redis is not None else redis
     for other_id in watcher_ids:
-        coords = await geo.position(redis, other_id)
+        coords = await geo.position(geo_redis, other_id)
         if coords is None:
             continue
-        await refresh_neighborhood(redis, hub, other_id, coords[0], coords[1], radius_m)
+        await refresh_neighborhood(
+            redis, hub, other_id, coords[0], coords[1], radius_m, geo_redis=geo_redis
+        )

@@ -132,6 +132,7 @@ def smtp_settings(**overrides) -> config.Settings:
     options = {
         "environment": "production",
         "jwt_secret": "a" * 48,
+        "public_base_url": "https://backend.example.com",
         "email_sender": "smtp",
         "smtp_host": "smtp.example.com",
         "smtp_from": "no-reply@example.com",

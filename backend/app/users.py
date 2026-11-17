@@ -15,8 +15,10 @@ Keys:
                                        told apart from a token that never existed
 * ``dogwalk:reset:<digest>``         - password reset codes, keyed by a hash of
                                        email + code so the code is never stored
-* ``dogwalk:reset:attempts:<email>`` - wrong-code counter, bounds guessing
-* ``dogwalk:loginfail:<email>``      - failed login counter, for lockout
+* ``dogwalk:reset:attempts:<email>`` - hash: client address -> wrong-code count
+* ``dogwalk:loginfail:<email>``      - hash: client address -> failed-login count,
+                                       so a lockout only locks the address that
+                                       produced the failures, never the owner's
 """
 
 import hashlib
@@ -170,12 +172,19 @@ async def session_counts(redis, user_ids: list[str]) -> dict[str, int]:
     return {user_id: int(count) for user_id, count in zip(user_ids, counts)}
 
 
-async def authenticate(redis, email: str, password: str) -> dict:
-    """Verify credentials, counting failures so an email cannot be brute forced."""
+async def authenticate(redis, email: str, password: str, client_ip: str = "") -> dict:
+    """Verify credentials, counting failures so an email cannot be brute forced.
+
+    The counter is a hash keyed by client address, so a lockout only ever locks
+    the address that produced the failures: one attacker hammering an address
+    cannot lock its owner out from their own device. ``client_ip`` is the same
+    identity the rate limiter bills to (``X-Forwarded-For``, set by Caddy).
+    """
     email = normalise_email(email)
     fail_key = LOGIN_FAIL_KEY.format(email=email)
+    field = client_ip or "unknown"
 
-    failures = await redis.get(fail_key)
+    failures = await redis.hget(fail_key, field)
     if failures is not None and int(failures) >= MAX_LOGIN_FAILURES:
         raise LockedOut(email)
 
@@ -188,12 +197,12 @@ async def authenticate(redis, email: str, password: str) -> dict:
     password_ok = auth.verify_password(password, stored)
 
     if user is None or not password_ok:
-        count = await redis.incr(fail_key)
+        count = await redis.hincrby(fail_key, field, 1)
         if count == 1:
             await redis.expire(fail_key, LOGIN_FAILURE_WINDOW_SECONDS)
         raise InvalidCredentials(email)
 
-    await redis.delete(fail_key)
+    await redis.hdel(fail_key, field)
     return user
 
 
@@ -265,16 +274,17 @@ async def store_refresh(redis, jti: str, user_id: str, ttl_seconds: int) -> None
 async def consume_refresh(redis, jti: str) -> str | None:
     """Read and burn in one step: a refresh token is single use.
 
-    The burned id is remembered for a day so a replay can be told apart from a
-    token that never existed. See ``replay_of_consumed_refresh``.
+    ``GETDEL`` reads and deletes in a single atomic command, so two concurrent
+    refreshes presenting the same id cannot both win. A separate ``GET`` would
+    let both callers read the value before either deleted it. The burned id is
+    remembered for a day so a replay can be told apart from a token that never
+    existed. See ``replay_of_consumed_refresh``.
     """
-    key = REFRESH_KEY.format(jti=jti)
-    user_id = await redis.get(key)
+    user_id = await redis.getdel(REFRESH_KEY.format(jti=jti))
     if user_id is None:
         return None
 
     async with redis.pipeline(transaction=True) as pipe:
-        pipe.delete(key)
         pipe.srem(REFRESH_INDEX_KEY.format(user_id=user_id), jti)
         pipe.set(
             USED_REFRESH_KEY.format(jti=jti),
@@ -339,17 +349,18 @@ async def create_reset_code(redis, email: str) -> str:
     return code
 
 
-async def consume_reset_code(redis, email: str, code: str) -> str | None:
+async def consume_reset_code(redis, email: str, code: str, client_ip: str = "") -> str | None:
     """Exchange a code for the account it belongs to, or None.
 
-    Guessing is bounded by a per-address counter: ten wrong codes and the
-    address is out of the reset flow until the window expires. The code itself
-    is single use.
+    Guessing is bounded by a counter per (address, client ip), like the login
+    lockout: ten wrong codes from one address exhaust only that address, never
+    the owner's. The code itself is single use.
     """
     email = normalise_email(email)
     attempt_key = RESET_ATTEMPT_KEY.format(email=email)
+    field = client_ip or "unknown"
 
-    attempts = await redis.incr(attempt_key)
+    attempts = await redis.hincrby(attempt_key, field, 1)
     if attempts == 1:
         await redis.expire(attempt_key, RESET_TTL_SECONDS)
     if attempts > RESET_MAX_ATTEMPTS:
@@ -361,7 +372,7 @@ async def consume_reset_code(redis, email: str, code: str) -> str | None:
 
     await redis.delete(key)
     await redis.srem(RESET_INDEX_KEY.format(email=email), _reset_digest(email, code))
-    await redis.delete(attempt_key)
+    await redis.hdel(attempt_key, field)
 
     user = await get_by_email(redis, email)
     return user["user_id"] if user is not None else None

@@ -10,7 +10,9 @@ Keys:
 
 * ``dogwalk:admins:<admin_id>``       - hash: email, password_hash, created_at, token_version
 * ``dogwalk:admins:email:<email>``    - email -> admin_id, the uniqueness index
-* ``dogwalk:admin:loginfail:<email>`` - failed login counter, for lockout
+* ``dogwalk:admin:loginfail:<email>`` - hash: client address -> failed-login
+                                        count, so a lockout only locks the address
+                                        that produced the failures
 * ``dogwalk:admin:audit``             - capped list of JSON audit entries
 
 Admins are created with ``scripts/create_admin.py`` rather than through an
@@ -102,12 +104,17 @@ async def get_by_email(redis, email: str) -> dict | None:
     return await get_by_id(redis, admin_id)
 
 
-async def authenticate(redis, email: str, password: str) -> dict:
-    """Verify admin credentials, counting failures so an email cannot be guessed."""
+async def authenticate(redis, email: str, password: str, client_ip: str = "") -> dict:
+    """Verify admin credentials, counting failures so an email cannot be guessed.
+
+    The counter is a hash keyed by client address, same as the walker lockout:
+    a lockout only locks the address that produced the failures.
+    """
     email = normalise_email(email)
     fail_key = LOGIN_FAIL_KEY.format(email=email)
+    field = client_ip or "unknown"
 
-    failures = await redis.get(fail_key)
+    failures = await redis.hget(fail_key, field)
     if failures is not None and int(failures) >= MAX_LOGIN_FAILURES:
         raise LockedOut(email)
 
@@ -119,17 +126,17 @@ async def authenticate(redis, email: str, password: str) -> dict:
     password_ok = auth.verify_password(password, stored)
 
     if admin is None or not password_ok:
-        count = await redis.incr(fail_key)
+        count = await redis.hincrby(fail_key, field, 1)
         if count == 1:
             await redis.expire(fail_key, LOGIN_FAILURE_WINDOW_SECONDS)
         raise InvalidCredentials(email)
 
-    await redis.delete(fail_key)
+    await redis.hdel(fail_key, field)
     return admin
 
 
 async def change_password(
-    redis, operator: dict, current_password: str, new_password: str
+    redis, operator: dict, current_password: str, new_password: str, client_ip: str = ""
 ) -> int:
     """Replace an operator's password and sign out every other session.
 
@@ -144,7 +151,7 @@ async def change_password(
     returned version, which is what keeps the session that made the change
     alive while every other one drops.
     """
-    admin = await authenticate(redis, operator["email"], current_password)
+    admin = await authenticate(redis, operator["email"], current_password, client_ip)
 
     if auth.verify_password(new_password, admin["password_hash"]):
         raise SamePassword()

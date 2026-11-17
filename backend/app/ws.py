@@ -1,10 +1,12 @@
+import asyncio
 import json
 import logging
+import time
 
 from fastapi import APIRouter, Query, WebSocket, WebSocketDisconnect
 from pydantic import ValidationError
 
-from app import auth, config, geo, users
+from app import auth, config, geo, ratelimit, users
 from app.hub import Connection, Hub
 from app.protocol import ErrorFrame, LocationFrame, Welcome
 from app.proximity import refresh_watchers, update_walker
@@ -16,6 +18,29 @@ router = APIRouter()
 # Application close code for "your token is missing, expired or revoked".
 # The client treats this as "refresh and reconnect", not "network is down".
 UNAUTHORIZED = 4401
+
+# Close code for "too many handshakes from this address". Sent before the
+# handshake is accepted, so the client sees a refused connection rather than a
+# session that dies immediately.
+RATE_LIMITED = 4429
+
+# 1009 is the websocket "message too big" close code.
+MESSAGE_TOO_BIG = 1009
+
+# Close code for "a newer session for this account replaced this socket".
+REPLACED = 4409
+
+# A location frame is ~100 bytes. uvicorn's own ws-max-size is in megabytes, so
+# the cap that actually matters is here: anything past this is not a fix but an
+# attempt to make the server buffer and parse it.
+MAX_FRAME_BYTES = 4096
+
+# The client sends a fix every 5 s, so evaluating at most one fix per second
+# loses nothing. Without the floor a client could make the server run a
+# GEOSEARCH fan-out (update_walker refreshes every neighbour) per frame sent.
+# Fixes arriving inside the interval are coalesced, newest wins, so a fast
+# movement is never lost - only throttled.
+MIN_FRAME_INTERVAL_SECONDS = 1.0
 
 
 def _bearer(websocket: WebSocket) -> str | None:
@@ -41,9 +66,29 @@ async def walk_socket(
     websocket: WebSocket,
     name: str = Query("", max_length=64),
 ) -> None:
+    # Per-IP cap on handshakes, checked before accept() so a flooder never costs
+    # a socket. The middleware in ratelimit.py only sees http scope, so the
+    # websocket path runs its bucket here, billed to the same address.
+    if getattr(websocket.app.state, "rate_limit", True):
+        redis = getattr(websocket.app.state, "redis", None)
+        matched = ratelimit.match(websocket.url.path)
+        if redis is not None and matched is not None:
+            bucket, limit = matched
+            retry_after = await ratelimit.check(
+                redis,
+                ratelimit.client_identity_from(websocket.headers, websocket.client),
+                bucket,
+                limit,
+            )
+            if retry_after:
+                logger.info("walk socket rate limited, retry after %ds", retry_after)
+                await websocket.close(code=RATE_LIMITED, reason="too many connections")
+                return
+
     await websocket.accept()
 
     redis = websocket.app.state.redis
+    geo_redis = websocket.app.state.geo_redis
     hub: Hub = websocket.app.state.hub
     radius_m = config.settings.proximity_radius_m
 
@@ -65,6 +110,12 @@ async def walk_socket(
     walker_id = user["user_id"]
     name = _clean_name(name)
 
+    # If this account already has a socket, the new one wins. Closing the old one
+    # matters: left alone it would keep running while the hub tracks only the new
+    # connection, and its disconnect handler would drop the walker's hub entry and
+    # geo position out from under the live session.
+    await hub.close(walker_id, code=REPLACED, reason="replaced by a newer session")
+
     hub.add(Connection(walker_id=walker_id, name=name, websocket=websocket))
     await hub.send(
         walker_id,
@@ -72,32 +123,83 @@ async def walk_socket(
     )
     logger.info("walker %s connected (%s)", walker_id, name or "unnamed")
 
+    last_fix_at = 0.0
+    pending = None  # newest fix received inside the floor interval, not applied yet
+
     try:
         while True:
+            # receive() rather than receive_json(): the size of the frame has to
+            # be known before it is parsed, and uvicorn's own cap is megabytes.
+            # When a fix is pending, wait no longer than the rest of the floor
+            # interval, so the pending fix is applied on time even when no
+            # further frame arrives.
+            timeout = None
+            if pending is not None:
+                remaining = MIN_FRAME_INTERVAL_SECONDS - (time.monotonic() - last_fix_at)
+                timeout = remaining if remaining > 0 else 0.0
             try:
-                raw = await websocket.receive_json()
-            except json.JSONDecodeError:
-                await hub.send(walker_id, ErrorFrame(message="malformed JSON").model_dump())
-                continue
+                message = await asyncio.wait_for(websocket.receive(), timeout=timeout)
+            except asyncio.TimeoutError:
+                message = None
 
-            try:
-                frame = LocationFrame.model_validate(raw)
-            except ValidationError as exc:
-                await hub.send(
-                    walker_id,
-                    ErrorFrame(message=exc.errors()[0]["msg"]).model_dump(),
-                )
-                continue
+            frame = None
+            if message is not None:
+                if message["type"] == "websocket.disconnect":
+                    raise WebSocketDisconnect(message.get("code", 1000))
 
-            await geo.upsert(redis, walker_id, frame.lat, frame.lon)
-            await update_walker(redis, hub, walker_id, frame.lat, frame.lon, radius_m)
+                text = message.get("text")
+                if text is None and message.get("bytes") is not None:
+                    text = message["bytes"].decode("utf-8", errors="replace")
+                if text is not None:
+                    if len(text) > MAX_FRAME_BYTES:
+                        await websocket.close(code=MESSAGE_TOO_BIG, reason="frame too large")
+                        return
+
+                    try:
+                        raw = json.loads(text)
+                    except json.JSONDecodeError:
+                        await hub.send(walker_id, ErrorFrame(message="malformed JSON").model_dump())
+                        continue
+
+                    try:
+                        frame = LocationFrame.model_validate(raw)
+                    except ValidationError as exc:
+                        await hub.send(
+                            walker_id,
+                            ErrorFrame(message=exc.errors()[0]["msg"]).model_dump(),
+                        )
+                        continue
+
+                    if time.monotonic() - last_fix_at < MIN_FRAME_INTERVAL_SECONDS:
+                        # Inside the floor interval: keep only the newest fix. A
+                        # flood still costs at most one evaluation per interval,
+                        # and the walker's final position is never lost.
+                        pending = frame
+                        continue
+
+            if frame is None:
+                if pending is None:
+                    continue
+                frame = pending
+            pending = None
+            last_fix_at = time.monotonic()
+
+            await geo.upsert(geo_redis, walker_id, frame.lat, frame.lon)
+            await update_walker(
+                redis, hub, walker_id, frame.lat, frame.lon, radius_m, geo_redis=geo_redis
+            )
 
     except WebSocketDisconnect:
         pass
     finally:
         connection = hub.get(walker_id)
+        if connection is not None and connection.websocket is not websocket:
+            # A newer socket for this account replaced this one; the hub entry
+            # and the geo position belong to that session now.
+            connection = None
         watchers = set(connection.last_neighbors) if connection else set()
-        hub.remove(walker_id)
-        await geo.remove(redis, walker_id)
-        await refresh_watchers(redis, hub, watchers, radius_m)
+        if connection is not None:
+            hub.remove(walker_id)
+            await geo.remove(geo_redis, walker_id)
+        await refresh_watchers(redis, hub, watchers, radius_m, geo_redis=geo_redis)
         logger.info("walker %s disconnected", walker_id)

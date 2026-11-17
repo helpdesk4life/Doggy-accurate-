@@ -177,3 +177,25 @@ def test_available_counts_only_unused_codes(redis_client):
     asyncio.run(invites.consume(redis_client, codes[0]))
 
     assert asyncio.run(invites.available(redis_client)) == 2
+
+
+def test_the_used_set_is_capped(redis_client):
+    """The used set is bookkeeping for the panel's count, so it is capped at
+    MAX_USED_ENTRIES and the oldest entries are evicted; refund of an evicted
+    code must still put it back in the unused set."""
+
+    async def scenario():
+        codes = await invites.mint(redis_client, invites.MAX_USED_ENTRIES + 25)
+        for code in codes:
+            assert await invites.consume(redis_client, code) is True
+        used = await invites.used_count(redis_client)
+        unused = await invites.available(redis_client)
+        # codes[0] is the oldest, so it was evicted from the used set by now.
+        await invites.refund(redis_client, codes[0])
+        return used, unused, await invites.available(redis_client)
+
+    used, unused, after_refund = asyncio.run(scenario())
+
+    assert used == invites.MAX_USED_ENTRIES
+    assert unused == 0
+    assert after_refund == 1
