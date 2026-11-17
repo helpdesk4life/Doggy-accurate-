@@ -25,14 +25,22 @@ cannot both consume the same code.
 Keys:
 
 * ``dogwalk:invites``      - set of unused codes, normalised
-* ``dogwalk:invites:used`` - set of consumed codes, so a retry can be told apart
-                             from a code that never existed
+* ``dogwalk:invites:used`` - sorted set of consumed codes scored by consumption
+                             time, capped at ``MAX_USED_ENTRIES``. It exists for
+                             the used-count in the panel and for refund symmetry;
+                             nothing authorises on it, so evicting the oldest
+                             entries is safe.
 """
 
 import secrets
+import time
 
 UNUSED_KEY = "dogwalk:invites"
 USED_KEY = "dogwalk:invites:used"
+
+# The used set is bookkeeping, not a ledger: past this, the oldest consumed codes
+# are evicted. Without a cap the set grows by one member per registration, forever.
+MAX_USED_ENTRIES = 1000
 
 # No I, O, 0 or 1: these get read aloud and typed on a phone, and the pairs are
 # indistinguishable in most fonts.
@@ -84,7 +92,12 @@ async def consume(redis, code: str) -> bool:
         return False
     if not await redis.srem(UNUSED_KEY, normalised):
         return False
-    await redis.sadd(USED_KEY, normalised)
+    async with redis.pipeline(transaction=True) as pipe:
+        pipe.zadd(USED_KEY, {normalised: time.time()})
+        # Keep only the newest MAX_USED_ENTRIES, in the same transaction as the
+        # add, so the set can never outgrow the cap.
+        pipe.zremrangebyrank(USED_KEY, 0, -(MAX_USED_ENTRIES + 1))
+        await pipe.execute()
     return True
 
 
@@ -94,14 +107,20 @@ async def refund(redis, code: str) -> None:
     Registration consumes the code before it knows whether the email is free,
     because checking the email first would reintroduce the oracle. When the
     email turns out to be taken the registration did not happen, so the code
-    goes back rather than being burnt on a typo.
+    goes back rather than being burnt on a typo. Removing it from the used set
+    is harmless when the cap already evicted it.
     """
     normalised = normalise(code)
     if not normalised:
         return
     await redis.sadd(UNUSED_KEY, normalised)
-    await redis.srem(USED_KEY, normalised)
+    await redis.zrem(USED_KEY, normalised)
 
 
 async def available(redis) -> int:
     return int(await redis.scard(UNUSED_KEY))
+
+
+async def used_count(redis) -> int:
+    """How many consumed codes are still remembered (capped, see MAX_USED_ENTRIES)."""
+    return int(await redis.zcard(USED_KEY))

@@ -408,7 +408,7 @@ async def list_invites(
     unused = await redis.smembers(invites.UNUSED_KEY)
     return InviteSummary(
         unused=len(unused),
-        used=int(await redis.scard(invites.USED_KEY)),
+        used=await invites.used_count(redis),
         codes=sorted(invites.format_code(code) for code in unused),
     )
 
@@ -499,7 +499,7 @@ async def stats(
     return Stats(
         accounts=await users.count_users(redis),
         invites_unused=await invites.available(redis),
-        invites_used=int(await redis.scard(invites.USED_KEY)),
+        invites_used=await invites.used_count(redis),
     )
 
 

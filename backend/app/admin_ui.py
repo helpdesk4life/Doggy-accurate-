@@ -262,7 +262,7 @@ async def dashboard(request: Request):
             "page": "dashboard",
             "accounts": await users.count_users(redis),
             "invites_unused": await invites.available(redis),
-            "invites_used": int(await redis.scard(invites.USED_KEY)),
+            "invites_used": await invites.used_count(redis),
             "requests_pending": await account_requests.count(redis),
             "entries": await admin.recent(redis, 10),
         },
@@ -428,7 +428,7 @@ async def invites_page(request: Request, flash: str | None = None):
             "admin": operator,
             "page": "invites",
             "codes": sorted(invites.format_code(code) for code in unused),
-            "used": int(await redis.scard(invites.USED_KEY)),
+            "used": await invites.used_count(redis),
             "minted": minted,
         },
     )
