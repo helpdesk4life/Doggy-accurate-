@@ -97,6 +97,11 @@ class WalkSocketClient @Inject constructor(
         synchronized(lock) {
             if (stopped) return
             reconnectAttempt = 0
+            // A retry may already be waiting out its backoff. Left alone it
+            // fires after this call and calls openLocked() again, cancelling
+            // the socket opened here and dialling a third time.
+            reconnectJob?.cancel()
+            reconnectJob = null
             openLocked()
         }
     }

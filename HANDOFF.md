@@ -65,8 +65,39 @@ resolved 2026-11-17: it is the VPS *Linux* account `thomas`, not an app account,
 and it has been rotated (see **Session log — 2026-11-17**); ~~still no operator
 password-change route (rotation is delete + `create_admin.py`)~~ — closed
 2026-11-17, see **Session log — 2026-11-17 — the operator password-change
-route**; the email-verification decision; a reconnect backoff pass;
+route**; the email-verification decision; ~~a reconnect backoff pass~~ — closed
+2026-11-17, see **Session log — 2026-11-17 — the reconnect backoff pass**;
 accessibility; `/me`; blocks-cap atomicity; backups and monitoring on the box.
+
+## Session log — 2026-11-17 — the reconnect backoff pass
+
+The ladder arithmetic was already tested; what was not was the wiring, and the
+roadmap's complaint was that nobody had run the client against a backend that
+stays down. Both are now covered, and the pass found a bug.
+
+**The ladder, driven for real.** Six plain `500` responses, which OkHttp reports
+as failed upgrades, and the request timestamps recorded as they arrive. Three
+attempts land in 4.5 s with gaps of about 1 s then 2 s. That is the property the
+arithmetic test could not reach: a client that stalled after the first retry, or
+retried at a fixed 1 s, looks identical from the UI, which only ever shows
+"Offline". The tolerances are wide (700–1800 ms, 1500–3200 ms) because the
+timestamps are taken by polling, not by the socket.
+
+**The bug: `reconnect()` did not cancel a pending retry.** A failure schedules a
+retry one second out. `reconnect()` — called by `renewSession()` after a token
+refresh — opened a socket immediately but left that job running, so it fired
+afterwards and called `openLocked()` again, which cancels the socket it just
+opened and dials a third time. A healthy connection replaced for no reason, and
+one more attempt on a ladder that had just been reset to zero.
+
+It is a narrow window in practice: `reconnect()` is only reached from
+`authExpired`, which is emitted on `4401` and on a missing token, and neither of
+those schedules a retry. So this was latent rather than live. The fix is two
+lines — cancel and null the job before opening — and the test fails without it
+(`expected:<2> but was:<3>` requests).
+
+**Gate**: 68 Android tests (was 66), 0 failures, 0 lint errors. The two new ones
+are the sustained-failure ladder and the stale-retry regression.
 
 ## Session log — 2026-11-17 — the operator password-change route
 

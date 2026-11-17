@@ -223,6 +223,58 @@ class WalkSocketClientTest {
         )
     }
 
+    @Test
+    fun `a backend that keeps failing is retried on a growing ladder`() {
+        // Every attempt gets a plain 500, which OkHttp reports as a failed
+        // upgrade. What matters is that the loop keeps going and the gaps grow:
+        // a client that stalled after the first retry, or retried at a fixed
+        // 1 s, looks identical from the UI, which only ever shows "Offline".
+        repeat(6) { server.enqueue(MockResponse().setResponseCode(500)) }
+
+        client.connect(server.url("/ws/walk").toString(), "Pickle")
+
+        val stamps = mutableListOf<Long>()
+        val deadline = System.currentTimeMillis() + 4_500
+        while (System.currentTimeMillis() < deadline) {
+            if (server.takeRequest(200, TimeUnit.MILLISECONDS) != null) {
+                stamps.add(System.currentTimeMillis())
+            }
+        }
+
+        assertTrue("expected at least 3 attempts, saw ${stamps.size}", stamps.size >= 3)
+
+        val firstGap = stamps[1] - stamps[0]
+        val secondGap = stamps[2] - stamps[1]
+        assertTrue("first gap was ${firstGap}ms, expected about 1 s", firstGap in 700..1_800)
+        assertTrue("second gap was ${secondGap}ms, expected about 2 s", secondGap in 1_500..3_200)
+    }
+
+    @Test
+    fun `reconnect cancels a retry that was already scheduled`() {
+        // A failure schedules a retry one second out. If reconnect() does not
+        // cancel it, that stale job fires afterwards and calls openLocked(),
+        // which cancels the socket it just opened and dials again — a healthy
+        // connection replaced for no reason, and one more attempt on a ladder
+        // that should have reset.
+        server.enqueue(MockResponse().setResponseCode(500))
+        server.enqueue(upgrade())
+        server.enqueue(upgrade())
+
+        client.connect(server.url("/ws/walk").toString(), "Pickle")
+        assertTrue("expected the first attempt", server.takeRequest(5, TimeUnit.SECONDS) != null)
+
+        // Let onFailure run and schedule the retry before reconnecting.
+        Thread.sleep(300)
+
+        client.reconnect()
+        assertTrue(awaitState(ConnectionState.CONNECTED))
+
+        // Past the 1 s rung, where a stale job would fire.
+        Thread.sleep(1_500)
+
+        assertEquals("a scheduled retry must not fire after reconnect()", 2, server.requestCount)
+    }
+
     private fun signedInStore(access: String): AuthStore =
         AuthStore(InMemorySecureStore()).apply {
             save(

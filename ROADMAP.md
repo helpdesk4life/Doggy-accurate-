@@ -313,9 +313,13 @@ deploy mid-evening annoys someone.
   protection: GitHub refuses it on a private repo without Pro (`403 Upgrade to
   GitHub Pro`), so a red run does not block a merge. Nothing deploys either — the
   VPS pulls by hand. See **CI → Where it runs** in `HANDOFF.md`.
-- **Reconnect backoff is untested.** The client backs off 1 s → 30 s, but nobody
-  has run it against a backend that stays down for minutes. Worth a manual pass
-  and then a test.
+- ~~**Reconnect backoff is untested.**~~ Closed 2026-11-17. The ladder is now
+  driven for real against a backend that keeps failing: three attempts in 4.5 s
+  with gaps of about 1 s then 2 s, which is the arithmetic actually wired up
+  rather than asserted in isolation. Writing it found a bug — `reconnect()` did
+  not cancel a retry that was already waiting out its backoff, so a token
+  refresh could be followed by a stale job that cancelled the fresh socket and
+  dialled a third time. Fixed, with a test that fails without the fix.
 - ~~**The proximity alert goes stale when one of several walkers leaves.**~~
   Closed: the alert is rebuilt from the whole set inside the warning distance on
   every change, not just arrivals. One `ProximityEvent.Changed` carries everyone
