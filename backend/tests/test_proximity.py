@@ -6,7 +6,7 @@ import fakeredis.aioredis
 import pytest
 from fastapi.testclient import TestClient
 
-from app import geo
+from app import geo, ws
 from app.hub import Connection, Hub
 from app.main import create_app, sweep_once
 from app.proximity import refresh_neighborhood
@@ -99,7 +99,11 @@ def test_walkers_inside_radius_alert_each_other(client):
         assert [w["id"] for w in alice_alert["walkers"]] == [bob_id]
 
 
-def test_walker_leaving_radius_clears_both_maps(client):
+def test_walker_leaving_radius_clears_both_maps(client, monkeypatch):
+    # This test moves Bob twice in quick succession; the frame floor in
+    # app/ws.py would drop the second fix. It is about proximity, not rate
+    # limiting, so the floor is off here (test_ws_limits.py covers it).
+    monkeypatch.setattr(ws, "MIN_FRAME_INTERVAL_SECONDS", 0.0)
     _, alice_headers = sign_up(client, "alice@example.com")
     _, bob_headers = sign_up(client, "bob@example.com")
 

@@ -51,6 +51,12 @@ LIMITS: dict[str, Limit] = {
     # JSON endpoint are separate paths and each gets its own bucket.
     "/admin/auth/login": Limit(10, 60),
     "/admin/ui/login": Limit(10, 60),
+    # The walk socket. The http middleware below never sees websocket scope, so
+    # app/ws.py runs this bucket itself before accepting the handshake. It bounds
+    # both connection flooding and token guessing over the socket: one address
+    # gets this many handshakes a minute, which is ample for a phone that
+    # reconnects with backoff.
+    "/ws/walk": Limit(20, 60),
 }
 
 # Keyed by path prefix, for routes whose last segment is an id. The bucket is
@@ -80,17 +86,25 @@ def match(path: str) -> tuple[str, Limit] | None:
     return None
 
 
-def client_identity(request: Request) -> str:
-    """The address to bill this request to.
+def client_identity_from(headers, client) -> str:
+    """The address to bill a connection to, from its headers and socket.
 
     Caddy sets ``X-Forwarded-For`` to the real peer, so it is preferred. Falling
     back to the socket address keeps the limiter working when the app is run
     without the proxy, as the tests do.
+
+    Split out from ``client_identity`` so the websocket handler can bill its
+    handshakes to the same address the http middleware would have used.
     """
-    forwarded = request.headers.get("x-forwarded-for", "")
+    forwarded = headers.get("x-forwarded-for", "")
     if forwarded:
         return forwarded.split(",")[0].strip()
-    return request.client.host if request.client is not None else "unknown"
+    return client.host if client is not None else "unknown"
+
+
+def client_identity(request: Request) -> str:
+    """The address to bill this request to. See ``client_identity_from``."""
+    return client_identity_from(request.headers, request.client)
 
 
 async def check(redis, identity: str, path: str, limit: Limit) -> int:

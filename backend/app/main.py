@@ -113,6 +113,10 @@ def create_app(
 
     if rate_limit is None:
         rate_limit = config.settings.rate_limit_enabled
+    # The http middleware only covers http scope, so the websocket handler reads
+    # this flag and runs its own bucket in app/ws.py. Stored on app.state rather
+    # than read from settings so a test can turn the limiter off for both.
+    app.state.rate_limit = rate_limit
     if rate_limit:
         ratelimit.install(app)
 
