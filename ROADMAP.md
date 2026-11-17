@@ -266,6 +266,29 @@ Test count went from 129 to 207 across the sessions since the panel, 43 of them
 in `test_email.py` and `test_smtp_settings.py`. `deploy/verify.sh` passes 16/16
 on the VPS.
 
+## Security hardening — done (2026-11-17, PRs #17–#19)
+
+A second pass over the repo after the 2026-11-14 review, read-only first, then
+fixes. Everything below is merged and CI-green on `main`.
+
+| Item | Where |
+| --- | --- |
+| No HSTS on the production sites | `deploy/Caddyfile`, both sites |
+| `/ws/walk` accepted unlimited handshakes and frames | `app/ws.py` + `app/ratelimit.py`: 20 handshakes/min per IP before `accept()` (close 4429), frames capped at 4 KiB (close 1009), 1 evaluated fix/s per connection, coalesced newest-wins |
+| Refresh-token replay race (GET, then DELETE) | `app/users.py`: `GETDEL` |
+| No CSP on the admin panel | `app/main.py`: strict CSP + `X-Frame-Options: DENY` on `/admin/ui` |
+| `PUBLIC_BASE_URL` unchecked in production | `app/config.py`: boot refused unless it is the deployment's own https URL |
+| A second socket for one account corrupted hub/geo state | `app/ws.py`: old socket closed (4409); cleanup only when the hub points at its own connection |
+| Live GPS positions persisted in the AOF | `GEO_REDIS_URL` + `redis-geo` (persistence off, no published port) |
+| Lockout keyed per account = cheap DoS on the owner | per-address hash fields in `app/users.py` / `app/admin.py` |
+| `dogwalk:invites:used` grew without bound | capped ZSET, `MAX_USED_ENTRIES = 1000` |
+| Admin logout only dropped the cookie | per-token session `jti`, revoked by `/admin/ui/logout` and `POST /admin/auth/logout` |
+| GEOSEARCH N+1 and sweeper `HGETALL` | `WITHCOORD`; `SEEN_KEY` as ZSET with `ZRANGEBYSCORE` |
+
+Deployment note: the VPS needs `docker compose up -d redis redis-geo backend`
+once after pulling; `deploy/VPS.md` documents it plus the LUKS recommendation for
+the persistent volume.
+
 ## Deferred — deliberately, per the friends-and-family scope
 
 One P1 item is left undone. It is not forgotten; it is gated on a decision to go

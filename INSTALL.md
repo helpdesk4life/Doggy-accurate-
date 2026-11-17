@@ -28,7 +28,7 @@
    ```bash
    cd backend
    docker compose up -d --build
-   docker compose ps        # redis, backend and caddy healthy / running
+   docker compose ps        # redis, redis-geo, backend and caddy healthy / running
    ```
 
    Ports: backend on `127.0.0.1:8000` (loopback only, by design), Redis on `127.0.0.1:6379` (loopback only, no password), Caddy on `8443` on all interfaces (emulator and phones reach it through here).
