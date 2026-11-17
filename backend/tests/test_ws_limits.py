@@ -15,7 +15,7 @@ import pytest
 from fastapi.testclient import TestClient
 from starlette.websockets import WebSocketDisconnect
 
-from app import geo, ratelimit, ws
+from app import geo, ratelimit, users, ws
 from app.main import create_app
 
 PASSWORD = "correct-horse-battery"
@@ -28,9 +28,14 @@ def redis_client():
     return fakeredis.aioredis.FakeRedis(decode_responses=True)
 
 
-def make_client(redis_client, rate_limit: bool) -> TestClient:
+def make_client(redis_client, rate_limit: bool, geo_redis_client=None) -> TestClient:
     return TestClient(
-        create_app(redis_client=redis_client, rate_limit=rate_limit, invite_required=False)
+        create_app(
+            redis_client=redis_client,
+            geo_redis_client=geo_redis_client,
+            rate_limit=rate_limit,
+            invite_required=False,
+        )
     )
 
 
@@ -175,6 +180,29 @@ def test_a_second_socket_for_the_same_walker_replaces_the_first(redis_client):
 
         # Both sockets are gone now, so the position is removed.
         assert stored_position(redis_client, user_id) is None
+
+
+def test_geo_data_stays_on_the_volatile_geo_client(redis_client):
+    """With GEO_REDIS_URL split, positions live only on the geo instance: the
+    persistent store (the one with AOF on disk) must hold the account but no
+    coordinates."""
+    geo_redis = fakeredis.aioredis.FakeRedis(decode_responses=True)
+    with make_client(redis_client, rate_limit=False, geo_redis_client=geo_redis) as client:
+        user_id, headers = sign_up(client, "alice@example.com")
+        with client.websocket_connect("/ws/walk", headers=headers) as sock:
+            sock.receive_json()  # welcome
+            sock.send_json(location(BASE_LAT))
+            assert sock.receive_json()["type"] == "PROXIMITY_CLEAR"
+
+            lat, _ = asyncio.run(geo.position(geo_redis, user_id))
+            assert lat == pytest.approx(BASE_LAT)
+
+            # Asserted inside the socket: on disconnect the geo entry is removed.
+            assert asyncio.run(redis_client.hgetall(geo.POS_KEY)) == {}
+            assert asyncio.run(redis_client.zcard(geo.GEO_KEY)) == 0
+            assert asyncio.run(redis_client.hgetall(geo.SEEN_KEY)) == {}
+            # The account itself is on the persistent store.
+            assert asyncio.run(redis_client.exists(users.USER_KEY.format(user_id=user_id))) == 1
 
 
 def test_malformed_json_still_gets_an_error_frame(redis_client):

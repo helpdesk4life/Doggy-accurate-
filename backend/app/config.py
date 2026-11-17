@@ -25,6 +25,11 @@ class Settings:
     environment: str = os.getenv("DOGWALK_ENV", "development")
 
     redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+    # A separate Redis for the disposable geo index. Empty means "same instance
+    # as REDIS_URL". Point it at an instance with persistence off: live GPS
+    # positions are the most sensitive data in the deployment and must not be
+    # written to the AOF of the persistent store. See docker-compose.yml.
+    geo_redis_url: str = os.getenv("GEO_REDIS_URL", "")
     proximity_radius_m: float = float(os.getenv("PROXIMITY_RADIUS_M", "500"))
     walker_ttl_seconds: float = float(os.getenv("WALKER_TTL_SECONDS", "30"))
     sweep_interval_seconds: float = float(os.getenv("SWEEP_INTERVAL_SECONDS", "5"))

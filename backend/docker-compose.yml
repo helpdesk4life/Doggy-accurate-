@@ -22,6 +22,20 @@ services:
       timeout: 3s
       retries: 5
 
+  # The geo index is disposable - a walker with no fix for WALKER_TTL_SECONDS is
+  # dropped - so this instance runs with persistence OFF on purpose: live GPS
+  # positions are the most sensitive data in the deployment and must never be
+  # written to the AOF of the persistent redis above. No published port; only
+  # the backend container reaches it over the compose network.
+  redis-geo:
+    image: redis:7-alpine
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
   backend:
     build: .
     restart: unless-stopped
@@ -33,6 +47,8 @@ services:
       - "127.0.0.1:8000:8000"
     environment:
       REDIS_URL: redis://redis:6379/0
+      # Positions live here, not on the AOF-persisted redis: see redis-geo above.
+      GEO_REDIS_URL: redis://redis-geo:6379/0
       PROXIMITY_RADIUS_M: "500"
       WALKER_TTL_SECONDS: "30"
       SWEEP_INTERVAL_SECONDS: "5"
@@ -63,6 +79,8 @@ services:
       SMTP_SECURITY: ${SMTP_SECURITY:-starttls}
     depends_on:
       redis:
+        condition: service_healthy
+      redis-geo:
         condition: service_healthy
     # The image is python:3.12-slim, so there is no curl to probe with. This is
     # the same endpoint deploy/verify.sh checks from outside, which is the point:

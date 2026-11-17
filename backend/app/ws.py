@@ -88,6 +88,7 @@ async def walk_socket(
     await websocket.accept()
 
     redis = websocket.app.state.redis
+    geo_redis = websocket.app.state.geo_redis
     hub: Hub = websocket.app.state.hub
     radius_m = config.settings.proximity_radius_m
 
@@ -183,8 +184,10 @@ async def walk_socket(
             pending = None
             last_fix_at = time.monotonic()
 
-            await geo.upsert(redis, walker_id, frame.lat, frame.lon)
-            await update_walker(redis, hub, walker_id, frame.lat, frame.lon, radius_m)
+            await geo.upsert(geo_redis, walker_id, frame.lat, frame.lon)
+            await update_walker(
+                redis, hub, walker_id, frame.lat, frame.lon, radius_m, geo_redis=geo_redis
+            )
 
     except WebSocketDisconnect:
         pass
@@ -197,6 +200,6 @@ async def walk_socket(
         watchers = set(connection.last_neighbors) if connection else set()
         if connection is not None:
             hub.remove(walker_id)
-            await geo.remove(redis, walker_id)
-        await refresh_watchers(redis, hub, watchers, radius_m)
+            await geo.remove(geo_redis, walker_id)
+        await refresh_watchers(redis, hub, watchers, radius_m, geo_redis=geo_redis)
         logger.info("walker %s disconnected", walker_id)

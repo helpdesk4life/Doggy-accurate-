@@ -70,13 +70,14 @@ async def _refresh(request: Request, walker_ids: set[str]) -> None:
         return
 
     redis = _redis(request)
+    geo_redis = request.app.state.geo_redis
     radius_m = config.settings.proximity_radius_m
     for walker_id in walker_ids:
-        coords = await geo.position(redis, walker_id)
+        coords = await geo.position(geo_redis, walker_id)
         if coords is None:
             continue
         await proximity.refresh_neighborhood(
-            redis, hub, walker_id, coords[0], coords[1], radius_m
+            redis, hub, walker_id, coords[0], coords[1], radius_m, geo_redis=geo_redis
         )
 
 

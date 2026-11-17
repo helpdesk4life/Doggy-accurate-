@@ -173,7 +173,7 @@ def test_sweep_expires_stale_walkers_and_clears_watchers():
         # Bob's last fix is older than the 30 s TTL.
         await redis.hset(geo.SEEN_KEY, "bob", time.time() - 120)
 
-        app = SimpleNamespace(state=SimpleNamespace(redis=redis, hub=hub))
+        app = SimpleNamespace(state=SimpleNamespace(redis=redis, geo_redis=redis, hub=hub))
         expired = await sweep_once(app)
         return expired, alice_socket.sent, bob_socket.sent
 
