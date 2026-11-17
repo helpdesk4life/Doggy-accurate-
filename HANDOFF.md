@@ -66,6 +66,50 @@ password-change route (rotation is delete + `create_admin.py`); the
 email-verification decision; a reconnect backoff pass; accessibility; `/me`;
 blocks-cap atomicity; backups and monitoring on the box.
 
+## Session log — 2026-11-17 — account requests: ask in the app, approve in the panel
+
+The invite gate answers "may a stranger register?" with a code. This adds the
+other answer: a stranger asks, and an operator decides. Three layers.
+
+**The endpoint.** `POST /auth/account-request` takes an address and answers
+**202 for every one** — free, already registered, already requested, or dropped
+because the backlog is full. A different answer would be a second enumeration
+oracle, which is the exact thing the invite gate exists to close. Throttled at
+5/hour per IP (`ratelimit.LIMITS`), queue capped at `MAX_PENDING = 100`, and an
+address that already has an account is never queued.
+
+**The store.** `app/account_requests.py`: a sorted set for ordering, a hash per
+request, and an email index written with `SET NX` so two simultaneous requests
+for one address cannot both win. Nothing here touches `dogwalk:users:*` — a
+request is not an account.
+
+**The approval.** `admin.approve_request` is shared by the JSON API and the
+panel, like the other account mutations. It creates the account through
+`create_account` and **throws the generated password away**: the operator never
+sees it, so it cannot become a shared secret, and the only way in is the reset
+flow. The approval email says so and carries no code — a password in a mail body
+would outlive the fifteen minutes a reset code is good for. A failed send does
+not fail the approval; the panel reports `email_sent: false` and "Forgot
+password" works regardless.
+
+**The panel.** `/admin/ui/requests`, a nav entry, and a dashboard card. Approve
+and reject are form posts with a redirect, like every other page.
+
+**The app.** A "Request an account" button on the login screen opens a one-field
+dialog. `AuthApi` now takes `WalkSettings` rather than `SettingsStore`, which is
+what lets the call be tested on the JVM — the interface already existed for
+exactly that reason.
+
+Gates: `pytest -q` → **235 passed** (28 new in `test_account_requests.py`),
+`testDebugUnitTest` → **66 passed** (2 new in `AuthApiTest`), `lintDebug` → 0
+errors. `scripts/e2e.py` was **not** re-run: it needs the Docker stack, and
+nothing it exercises changed shape. Adding request checks to it is the obvious
+follow-up.
+
+One thing the tests caught: `create` originally queued a request for an address
+that already had an account, which an operator could only ever answer with a
+409. Fixed in the module, not the test.
+
 ## Session log — 2026-11-17 — `THOMAS_USER_PASSWORD` explained and rotated
 
 The carried-forward oddity was a misdiagnosis, not a stale secret. The entry was
@@ -1631,10 +1675,11 @@ next person meets it as a passing test rather than a mystery failure.
 
 - **The Android tests cover the transport, the session, the repository, the auth
   store, the walk history, the movement rules and the alert rule, not the rest.**
-  64 tests: `WalkSocketClient` (connect, bearer header, frame decoding, 4401,
+  66 tests: `WalkSocketClient` (connect, bearer header, frame decoding, 4401,
   reconnect, the backoff ladder), `WalkRepository` (proximity bookkeeping, the
   session-renewal branches and recording the finished walk), `AuthStore` (the
-  sign-in state machine), `HttpBase` (the `ws` → `http` mapping),
+  sign-in state machine), `HttpBase` (the `ws` → `http` mapping), `AuthApi` (the
+  account-request call and its refusal),
   `WalkStatsRecorder` and `WalkHistoryStore`, `MovementDetector`,
   `ProximityAlertPolicy`. `SettingsStore`, the notification *posting* code and
   the Compose UI still have none.

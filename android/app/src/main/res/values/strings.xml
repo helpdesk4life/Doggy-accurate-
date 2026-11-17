@@ -85,6 +85,12 @@
     <string name="auth_error_passwords_differ">The two passwords do not match.</string>
 
     <string name="auth_forgot_password">Forgot password?</string>
+    <string name="auth_request_account">Request an account</string>
+    <string name="request_title">Request an account</string>
+    <string name="request_body">An operator approves new accounts. Leave your email and you will get a message once it is approved.</string>
+    <string name="request_send">Send request</string>
+    <string name="request_sent">Request sent. An operator will approve it, and you will get an email when they do.</string>
+    <string name="request_close">Close</string>
     <string name="reset_title">Reset password</string>
     <string name="reset_body">We will email a six-digit code to the address on the account.</string>
     <string name="reset_code">Six-digit code</string>

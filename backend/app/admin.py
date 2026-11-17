@@ -20,10 +20,13 @@ existing invite script already establishes "operator actions are scripts".
 """
 
 import json
+import logging
 import time
 import uuid
 
-from app import auth, users
+from app import account_requests, auth, email, users
+
+logger = logging.getLogger(__name__)
 
 ADMIN_KEY = "dogwalk:admins:{admin_id}"
 ADMIN_EMAIL_KEY = "dogwalk:admins:email:{email}"
@@ -199,6 +202,62 @@ async def create_account(redis, operator: dict, email: str) -> tuple[dict, str]:
         redis, operator, "create_user", target=account["user_id"], detail=account["email"]
     )
     return account, password
+
+
+async def approve_request(
+    redis, operator: dict, request_id: str, email_sender
+) -> tuple[dict, bool] | None:
+    """Turn a pending request into an account, and tell the requester.
+
+    The account is created with a generated password that is thrown away. The
+    operator never sees it, so it cannot become a shared secret, and the only
+    way in is the reset flow — which is the account choosing its own password.
+    That is also why the email carries no credential: a password in a mail body
+    would outlive the fifteen minutes a reset code is good for.
+
+    Returns ``(account, email_sent)``, or ``None`` when there is no such
+    request. A failed send is not a failed approval: the account exists, and
+    "Forgot password" works whether or not the notice arrived.
+    """
+    request_record = await account_requests.get(redis, request_id)
+    if request_record is None:
+        return None
+
+    try:
+        account, _password = await create_account(redis, operator, request_record["email"])
+    except users.EmailTaken:
+        # An invite code or another operator got there first. The request is
+        # moot, so it goes rather than sitting in the queue forever.
+        await account_requests.remove(redis, request_id)
+        raise
+
+    await account_requests.remove(redis, request_id)
+
+    sent = True
+    try:
+        await email_sender.send(
+            to=account["email"],
+            subject="Your DogWalk account has been approved",
+            body=email.approval_email_body(),
+        )
+    except Exception:
+        sent = False
+        logger.exception("could not send the approval email for %s", account["user_id"])
+
+    await record(
+        redis, operator, "approve_request", target=account["user_id"], detail=account["email"]
+    )
+    return account, sent
+
+
+async def reject_request(redis, operator: dict, request_id: str) -> bool:
+    """Drop a request without creating anything. False when it is already gone."""
+    request_record = await account_requests.remove(redis, request_id)
+    if request_record is None:
+        return False
+
+    await record(redis, operator, "reject_request", detail=request_record["email"])
+    return True
 
 
 async def revoke_sessions(redis, hub, operator: dict, user_id: str) -> bool:

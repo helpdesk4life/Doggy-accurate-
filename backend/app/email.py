@@ -148,6 +148,21 @@ def reset_email_body(code: str, ttl_minutes: int) -> str:
     )
 
 
+def approval_email_body() -> str:
+    """The notice that an account request was approved.
+
+    Deliberately carries no credential. The account was created with a password
+    nobody holds, so the only way in is the reset flow — and a password in a
+    mail body would outlive the fifteen minutes a reset code is good for.
+    """
+    return (
+        "Your DogWalk account has been approved.\n\n"
+        'Open the app, tap "Forgot password?" and set a password of your own.\n\n'
+        "That is the only way in: nobody, including the person who approved you, "
+        "has a password for this account.\n"
+    )
+
+
 def test_email_body(host: str) -> str:
     return (
         "This is a test message from the DogWalk admin panel.\n\n"

@@ -1,6 +1,6 @@
 package com.dogwalk.data.auth
 
-import com.dogwalk.data.SettingsStore
+import com.dogwalk.data.WalkSettings
 import com.dogwalk.data.remote.httpBaseOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -24,7 +24,7 @@ import javax.inject.Singleton
 @Singleton
 class AuthApi @Inject constructor(
     private val json: Json,
-    private val settings: SettingsStore,
+    private val settings: WalkSettings,
 ) : TokenRefresher {
     private val client = OkHttpClient.Builder()
         .connectTimeout(10, TimeUnit.SECONDS)
@@ -108,6 +108,15 @@ class AuthApi @Inject constructor(
      */
     suspend fun requestPasswordReset(email: String) {
         send("POST", "/auth/password-reset/request", json.encodeToString(EmailRequest(email)))
+    }
+
+    /**
+     * Ask an operator for an account. Same 202-either-way rule as the reset
+     * request: the answer says nothing about whether the address is registered.
+     * Nothing is created here — an operator approves it in the panel.
+     */
+    suspend fun requestAccount(email: String) {
+        send("POST", "/auth/account-request", json.encodeToString(EmailRequest(email)))
     }
 
     /** Exchange a reset code for a new password. Every existing session dies. */

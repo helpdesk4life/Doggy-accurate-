@@ -143,7 +143,7 @@ cd backend
 .venv/Scripts/python -m pytest -q
 ```
 
-207 tests. They run against `fakeredis`, so no Redis server is needed.
+235 tests. They run against `fakeredis`, so no Redis server is needed.
 
 | File | Covers |
 | --- | --- |
@@ -155,6 +155,7 @@ cd backend
 | `test_smtp_settings.py` | The panel's configuration store: round trip, a saved configuration beating `EMAIL_SENDER`, the password never coming back out, the test send not saving, the page never rendering the password, and the reset-code index drained on use and on account deletion |
 | `test_ratelimit.py` | Per-address throttling, per-address isolation, health exempt, limiter can be disabled, and the `/blocks/` prefix bucket shared across ids |
 | `test_invites.py` | The gate, single use, refund on a taken email, and that a taken and a free address are indistinguishable without a code |
+| `test_account_requests.py` | The request endpoint: 202 for a free, taken, duplicate or backlogged address alike, the cap, the rate limit, approval creating an account with no usable password, the reset journey that follows, rejection, and the audit entries |
 | `test_admin.py` | The token boundary in both directions, admin lockout, user listing and paging, account creation and the forced password change it triggers, revoke and delete, invite minting, the audit log, and that no admin response carries a position |
 | `test_admin_ui.py` | The cookie (HttpOnly, SameSite, path), redirects without one, the add-account form and its errors, the one-shot password notice, the confirmation page, the one-shot mint flash, and that no page mentions a coordinate |
 | `test_blocks.py` | Blocking a walker: symmetric invisibility in both directions, unblock, the name kept for an offline walker, blocking yourself, a block surviving a new session, the 200-entry ceiling and its 409, and that deleting an account clears it from other block lists |
@@ -177,6 +178,7 @@ unreachable until you sign in.
 | Endpoint | Purpose |
 | --- | --- |
 | `POST /auth/register` | Create an account with an invite code, returns a token pair (201) |
+| `POST /auth/account-request` | Ask an operator for an account; always 202 (see [Account requests](#account-requests)) |
 | `POST /auth/login` | Exchange email and password for a token pair, or a password-change ticket |
 | `POST /auth/refresh` | Exchange a refresh token for a new pair |
 | `POST /auth/logout` | Revoke one refresh token (204) |
@@ -265,6 +267,30 @@ Set `INVITE_REQUIRED=0` to turn the gate off. Do that only once there is email
 verification to replace it, because that is the only thing that closes the oracle
 properly.
 
+### Account requests
+
+The other way in, for someone who was not handed a code: the app's login screen
+has **Request an account**, which posts an address to
+`POST /auth/account-request`. Nothing is created. The request waits in the panel
+at `/admin/ui/requests`, where an operator approves or rejects it.
+
+The endpoint answers **202 for every address** — free, already registered,
+already requested, or dropped because the backlog is full. That is the same
+reasoning as the invite gate: an answer that differed would say whether an
+address has an account. It is throttled at 5 per hour per IP, the queue is
+capped at 100, and a request for an address that already has an account is never
+queued.
+
+Approving creates the account with a generated password that is **thrown away**.
+The operator never sees it, so it cannot become a shared secret, and the only
+way in is the reset flow — the approval email says so and carries no code. The
+requester opens the app, taps **Forgot password?**, and sets a password of their
+own. That clears the handed-over flag, so the first sign-in is a normal one.
+
+A failed send does not fail the approval: the account exists, and "Forgot
+password" works whether or not the notice arrived. The panel says which
+happened.
+
 When the access token expires mid-walk the backend closes the socket with
 application code `4401`. The app exchanges its refresh token, reconnects, and
 carries on without user action. If the refresh token is dead too, the session is
@@ -274,7 +300,8 @@ cleared and the UI falls back to the login screen.
 
 A web panel for accounts, invite codes and outbound email, at `/admin/ui`. It is
 deliberately narrow: it can see who is registered, create an account, sign one
-out, delete one, mint invite codes, and point the deployment at an SMTP server.
+out, delete one, approve or reject an account request, mint invite codes, and
+point the deployment at an SMTP server.
 It cannot see where anyone is — nothing in `app/routes_admin.py` or
 `app/admin_ui.py` reads the geo index, and `test_admin.py` asserts that no admin
 response contains a position field.
@@ -377,6 +404,9 @@ and `smtp_test` with the recipient and whether it was delivered.
 | `DELETE /admin/users/{id}` | Delete the account and everything attached to it (204) |
 | `GET /admin/invites` | Unused codes, and how many have been used |
 | `POST /admin/invites` | Mint 1–50 codes (201) |
+| `GET /admin/requests` | Accounts strangers asked for, newest first |
+| `POST /admin/requests/{id}/approve` | Create the account and email the requester (201) |
+| `DELETE /admin/requests/{id}` | Reject a request (204) |
 | `GET /admin/stats` | Account and invite counts |
 | `GET /admin/smtp` | The SMTP configuration in use, with `has_password` rather than the password |
 | `PUT /admin/smtp` | Save a configuration and rebuild the running sender (400 if it is unusable) |

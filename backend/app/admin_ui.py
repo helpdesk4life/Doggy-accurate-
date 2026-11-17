@@ -26,7 +26,7 @@ from fastapi import APIRouter, Form, Request
 from fastapi.responses import HTMLResponse, RedirectResponse
 from fastapi.templating import Jinja2Templates
 
-from app import admin, auth, config, email, invites, smtp_settings, users
+from app import account_requests, admin, auth, config, email, invites, smtp_settings, users
 from app.routes_admin import EMAIL_PATTERN
 
 router = APIRouter(prefix="/admin/ui", tags=["admin-ui"], include_in_schema=False)
@@ -169,6 +169,7 @@ async def dashboard(request: Request):
             "accounts": await users.count_users(redis),
             "invites_unused": await invites.available(redis),
             "invites_used": int(await redis.scard(invites.USED_KEY)),
+            "requests_pending": await account_requests.count(redis),
             "entries": await admin.recent(redis, 10),
         },
     )
@@ -351,6 +352,82 @@ async def mint(request: Request, count: int = Form(1)):
 
     flash_id = await _flash_put(redis, {"codes": codes})
     return RedirectResponse(f"/admin/ui/invites?flash={flash_id}", status_code=303)
+
+
+# --- account requests -----------------------------------------------------
+
+
+async def _requests_context(redis, operator: dict) -> dict:
+    """Everything the requests page needs, so a failed approval can redraw it."""
+    records = await account_requests.pending(redis)
+    return {
+        "admin": operator,
+        "page": "requests",
+        "requests": [
+            {
+                "request_id": record["request_id"],
+                "email": record["email"],
+                "created_at": int(record["created_at"]),
+            }
+            for record in records
+        ],
+        "total": await account_requests.count(redis),
+        "approved": {},
+        "error": None,
+    }
+
+
+@router.get("/requests", response_class=HTMLResponse)
+async def requests_page(request: Request, flash: str | None = None):
+    operator = await _current(request)
+    if operator is None:
+        return _to_login()
+
+    redis = request.app.state.redis
+    context = await _requests_context(redis, operator)
+    context["approved"] = await _flash_take(redis, flash)
+    return _page(request, "requests", context)
+
+
+@router.post("/requests/{request_id}/approve")
+async def approve_request(request: Request, request_id: str):
+    """Create the account and email the requester.
+
+    The account is made with a password nobody keeps, so the requester sets
+    their own through "Forgot password" in the app. The notice says so; it
+    carries no credential.
+    """
+    operator = await _current(request)
+    if operator is None:
+        return _to_login()
+
+    redis = request.app.state.redis
+    try:
+        outcome = await admin.approve_request(
+            redis, operator, request_id, request.app.state.email_sender
+        )
+    except users.EmailTaken:
+        context = await _requests_context(redis, operator)
+        context["error"] = "That address already has an account."
+        return _page(request, "requests", context, status_code=400)
+
+    if outcome is None:
+        # Approved twice, or rejected in another tab. Nothing to report.
+        return RedirectResponse("/admin/ui/requests", status_code=303)
+
+    account, sent = outcome
+    flash_id = await _flash_put(redis, {"email": account["email"], "sent": sent})
+    return RedirectResponse(f"/admin/ui/requests?flash={flash_id}", status_code=303)
+
+
+@router.post("/requests/{request_id}/reject")
+async def reject_request(request: Request, request_id: str):
+    operator = await _current(request)
+    if operator is None:
+        return _to_login()
+
+    await admin.reject_request(request.app.state.redis, operator, request_id)
+    return RedirectResponse("/admin/ui/requests", status_code=303)
 
 
 @router.get("/audit", response_class=HTMLResponse)

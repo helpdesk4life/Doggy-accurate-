@@ -47,6 +47,19 @@ data class ResetUiState(
     val notice: String? = null,
 )
 
+/**
+ * The "ask for an account" sheet. One field and one outcome: the server answers
+ * 202 whether or not the address is already registered, so [done] means the
+ * request was accepted, never that the address was free.
+ */
+data class RequestUiState(
+    val visible: Boolean = false,
+    val email: String = "",
+    val isBusy: Boolean = false,
+    val done: Boolean = false,
+    val error: String? = null,
+)
+
 @HiltViewModel
 class LoginViewModel @Inject constructor(
     private val authApi: AuthApi,
@@ -58,6 +71,9 @@ class LoginViewModel @Inject constructor(
 
     private val _reset = MutableStateFlow(ResetUiState())
     val reset: StateFlow<ResetUiState> = _reset.asStateFlow()
+
+    private val _request = MutableStateFlow(RequestUiState())
+    val request: StateFlow<RequestUiState> = _request.asStateFlow()
 
     fun setEmail(value: String) {
         _state.value = _state.value.copy(email = value, error = null)
@@ -265,6 +281,51 @@ class LoginViewModel @Inject constructor(
                     error = (error as? AuthException)?.message ?: UNREACHABLE,
                 )
             }
+        }
+    }
+
+    // --- account request --------------------------------------------------
+
+    fun openRequest() {
+        _request.value = RequestUiState(visible = true, email = _state.value.email.trim())
+    }
+
+    fun closeRequest() {
+        _request.value = RequestUiState()
+    }
+
+    fun setRequestEmail(value: String) {
+        _request.value = _request.value.copy(email = value, error = null)
+    }
+
+    /**
+     * Ask an operator for an account. Nothing is created here: the request sits
+     * in the panel until someone approves it, and the approval email points at
+     * "Forgot password" to set a password.
+     */
+    fun submitRequest() {
+        val current = _request.value
+        if (current.isBusy) return
+
+        val email = current.email.trim()
+        if (email.isBlank()) {
+            _request.value = current.copy(error = UNREACHABLE)
+            return
+        }
+
+        _request.value = current.copy(isBusy = true, error = null)
+        viewModelScope.launch {
+            runCatching { authApi.requestAccount(email) }
+                .onSuccess {
+                    // 202 either way, so this must not claim the address was free.
+                    _request.value = _request.value.copy(isBusy = false, done = true)
+                }
+                .onFailure { error ->
+                    _request.value = _request.value.copy(
+                        isBusy = false,
+                        error = (error as? AuthException)?.message ?: UNREACHABLE,
+                    )
+                }
         }
     }
 

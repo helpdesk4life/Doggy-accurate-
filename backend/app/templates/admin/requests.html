@@ -1,0 +1,58 @@
+{% extends "admin/base.html" %}
+{% block title %}Requests · DogWalk admin{% endblock %}
+{% block content %}
+<h1>Account requests</h1>
+<p class="lede">{{ total }} waiting. Approving creates the account and emails the requester.</p>
+
+{% if approved %}
+<div class="notice">
+  <h2>Approved</h2>
+  <p class="mono">{{ approved.email }}</p>
+  {% if approved.sent %}
+  <p class="muted small">
+    They have been emailed. The account has no password yet: they set one with
+    "Forgot password" in the app.
+  </p>
+  {% else %}
+  <p class="muted small">
+    The account exists, but the email could not be sent. Tell them to open the
+    app and use "Forgot password" — that works whether or not the notice arrived.
+  </p>
+  {% endif %}
+</div>
+{% endif %}
+
+{% if error %}
+<div class="notice error">
+  <p><strong>Not approved.</strong> {{ error }}</p>
+</div>
+{% endif %}
+
+{% if requests %}
+<table>
+  <thead>
+    <tr><th>Email</th><th>Requested</th><th></th></tr>
+  </thead>
+  <tbody>
+  {% for item in requests %}
+    <tr>
+      <td>{{ item.email }}</td>
+      <td class="num muted">{{ item.created_at | when }}</td>
+      <td>
+        <div class="row">
+          <form class="inline" method="post" action="/admin/ui/requests/{{ item.request_id }}/approve">
+            <button class="primary" type="submit">Approve</button>
+          </form>
+          <form class="inline" method="post" action="/admin/ui/requests/{{ item.request_id }}/reject">
+            <button class="danger" type="submit">Reject</button>
+          </form>
+        </div>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+{% else %}
+<p class="empty">No requests waiting.</p>
+{% endif %}
+{% endblock %}

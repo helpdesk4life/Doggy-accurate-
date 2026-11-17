@@ -42,6 +42,7 @@ import com.dogwalk.R
 fun LoginScreen(viewModel: LoginViewModel = hiltViewModel()) {
     val state by viewModel.state.collectAsStateWithLifecycle()
     val reset by viewModel.reset.collectAsStateWithLifecycle()
+    val request by viewModel.request.collectAsStateWithLifecycle()
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -221,6 +222,11 @@ fun LoginScreen(viewModel: LoginViewModel = hiltViewModel()) {
                     TextButton(onClick = viewModel::openReset, enabled = !state.isBusy) {
                         Text(stringResource(R.string.auth_forgot_password))
                     }
+                    // The alternative to holding an invite code: ask, and an
+                    // operator approves it in the panel.
+                    TextButton(onClick = viewModel::openRequest, enabled = !state.isBusy) {
+                        Text(stringResource(R.string.auth_request_account))
+                    }
                 }
             }
         }
@@ -237,6 +243,78 @@ fun LoginScreen(viewModel: LoginViewModel = hiltViewModel()) {
             onDismiss = viewModel::closeReset,
         )
     }
+
+    if (request.visible) {
+        RequestDialog(
+            state = request,
+            onEmail = viewModel::setRequestEmail,
+            onSubmit = viewModel::submitRequest,
+            onDismiss = viewModel::closeRequest,
+        )
+    }
+}
+
+@Composable
+private fun RequestDialog(
+    state: RequestUiState,
+    onEmail: (String) -> Unit,
+    onSubmit: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.request_title)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                if (state.done) {
+                    Text(
+                        text = stringResource(R.string.request_sent),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.primary,
+                    )
+                } else {
+                    Text(
+                        text = stringResource(R.string.request_body),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    OutlinedTextField(
+                        value = state.email,
+                        onValueChange = onEmail,
+                        label = { Text(stringResource(R.string.auth_email)) },
+                        singleLine = true,
+                        enabled = !state.isBusy,
+                        keyboardOptions = KeyboardOptions(
+                            keyboardType = KeyboardType.Email,
+                            imeAction = ImeAction.Done,
+                        ),
+                        modifier = Modifier.fillMaxWidth(),
+                    )
+                    state.error?.let { error ->
+                        Text(
+                            text = errorText(error),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (state.done) {
+                TextButton(onClick = onDismiss) { Text(stringResource(R.string.request_close)) }
+            } else {
+                TextButton(onClick = onSubmit, enabled = !state.isBusy) {
+                    Text(stringResource(R.string.request_send))
+                }
+            }
+        },
+        dismissButton = if (state.done) {
+            null
+        } else {
+            { TextButton(onClick = onDismiss) { Text(stringResource(R.string.request_close)) } }
+        },
+    )
 }
 
 @Composable

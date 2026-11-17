@@ -23,7 +23,7 @@ every admin, so it records *that* codes were minted, never the codes.
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from pydantic import BaseModel, Field
 
-from app import admin, auth, config, email, invites, smtp_settings, users
+from app import account_requests, admin, auth, config, email, invites, smtp_settings, users
 
 router = APIRouter(prefix="/admin", tags=["admin"])
 
@@ -88,6 +88,31 @@ class InviteSummary(BaseModel):
     unused: int
     used: int
     codes: list[str]
+
+
+class AccountRequestSummary(BaseModel):
+    request_id: str
+    email: str
+    created_at: int
+
+
+class AccountRequestPage(BaseModel):
+    total: int
+    requests: list[AccountRequestSummary]
+
+
+class ApprovedRequest(BaseModel):
+    """The account an approval created.
+
+    No password: it was generated and discarded, so the requester sets their own
+    through the reset flow. ``email_sent`` is false when the provider refused —
+    the approval still stands, and "Forgot password" works regardless.
+    """
+
+    user_id: str
+    email: str
+    created_at: int
+    email_sent: bool
 
 
 class MintInvitesRequest(BaseModel):
@@ -330,6 +355,69 @@ async def mint_invites(
     codes = await invites.mint(redis, body.count)
     await admin.record(redis, operator, "mint_invites", detail=f"{len(codes)} code(s)")
     return MintedInvites(codes=codes, unused=await invites.available(redis))
+
+
+@router.get("/requests", response_model=AccountRequestPage)
+async def list_requests(
+    request: Request,
+    _operator: dict = Depends(require_admin),
+) -> AccountRequestPage:
+    """Accounts strangers asked for, newest first. Nothing here is an account yet."""
+    redis = _redis(request)
+
+    records = await account_requests.pending(redis)
+    return AccountRequestPage(
+        total=await account_requests.count(redis),
+        requests=[
+            AccountRequestSummary(
+                request_id=record["request_id"],
+                email=record["email"],
+                created_at=int(record["created_at"]),
+            )
+            for record in records
+        ],
+    )
+
+
+@router.post("/requests/{request_id}/approve", response_model=ApprovedRequest, status_code=201)
+async def approve_request(
+    request_id: str,
+    request: Request,
+    operator: dict = Depends(require_admin),
+) -> ApprovedRequest:
+    """Create the account and email the requester.
+
+    The account gets a generated password that is discarded, so the only way in
+    is the reset flow. See ``admin.approve_request``.
+    """
+    try:
+        outcome = await admin.approve_request(
+            _redis(request), operator, request_id, request.app.state.email_sender
+        )
+    except users.EmailTaken:
+        raise HTTPException(status_code=409, detail="email already registered")
+
+    if outcome is None:
+        raise HTTPException(status_code=404, detail="no such request")
+
+    account, sent = outcome
+    return ApprovedRequest(
+        user_id=account["user_id"],
+        email=account["email"],
+        created_at=int(account["created_at"]),
+        email_sent=sent,
+    )
+
+
+@router.delete("/requests/{request_id}", status_code=204)
+async def reject_request(
+    request_id: str,
+    request: Request,
+    operator: dict = Depends(require_admin),
+) -> Response:
+    if not await admin.reject_request(_redis(request), operator, request_id):
+        raise HTTPException(status_code=404, detail="no such request")
+    return Response(status_code=204)
 
 
 @router.get("/stats", response_model=Stats)

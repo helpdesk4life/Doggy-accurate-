@@ -23,7 +23,7 @@ export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
 
 # 4. Confirm nothing regressed
 cd /c/Users/thoma/Downloads/dog/backend
-./.venv/Scripts/python.exe -m pytest -q          # expect 207 passed
+./.venv/Scripts/python.exe -m pytest -q          # expect 235 passed
 ./.venv/Scripts/python.exe scripts/e2e.py        # expect 56/56
 ```
 
@@ -215,6 +215,22 @@ client to show a change screen — would have left the handed-over password
 working, which defeats the point of generating one. Test count went from 123 to
 129; the Android client grew a second step on the login screen to match.
 
+## P1.7 — account requests, done
+
+The invite gate is the right answer for "may a stranger register?", but it needs
+someone to hand out a code. This adds the self-service half: the app's login
+screen has **Request an account**, the request waits at `/admin/ui/requests`, and
+an operator approves or rejects it.
+
+The endpoint answers 202 for every address, for the same reason the invite gate
+exists — a different answer would say whether an address is registered. Approval
+creates the account with a password that is thrown away, so the requester sets
+their own through "Forgot password"; no credential travels by email.
+
+Not done, and worth deciding: the request carries no note, so the operator sees
+an address and nothing else. A short "who are you" field would make the decision
+easier for any address you do not recognise.
+
 ## Security review — done (2026-11-14)
 
 A pass over the deployment looking for gaps the P0/P1 tables do not cover. Two of
@@ -282,8 +298,8 @@ deploy mid-evening annoys someone.
 
 ## P2 — quality, before or shortly after launch
 
-- **Android tests cover five areas, seven now.** 64 tests: `WalkSocketClient`,
-  `WalkRepository`, `AuthStore`, `HttpBase`, and now the walk history
+- **Android tests cover five areas, seven now.** 66 tests: `WalkSocketClient`,
+  `WalkRepository`, `AuthStore`, `HttpBase`, `AuthApi`, and now the walk history
   (`WalkStatsRecorder`, `WalkHistoryStore`), `MovementDetector` and
   `ProximityAlertPolicy`. `WalkRepository` was the valuable
   one and is done — it runs on its seams (`WalkSettings`, `WalkTransport`,
@@ -397,8 +413,8 @@ that had drifted from the code: production TLS was recorded as still on the loca
 CA, blocking was recorded as not existing, the admin panel was recorded as having
 no second gate, and four test counts were stale. The second pass followed the
 security review and added the blocks API to `README.md`, which had never
-documented it, plus the two email test files. Current gate: 207 backend tests,
-56/56 e2e, 64 Android tests, 0 lint errors, 16/16 on the VPS.
+documented it, plus the two email test files. Current gate: 235 backend tests,
+56/56 e2e, 66 Android tests, 0 lint errors, 16/16 on the VPS.
 
 **Walk history and stats landed** (P3): distance, duration and dogs met, all
 derived client-side from what the app already receives — the first feature that

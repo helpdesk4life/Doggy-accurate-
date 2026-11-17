@@ -12,7 +12,7 @@ import logging
 from fastapi import APIRouter, HTTPException, Request, Response
 from pydantic import BaseModel, Field
 
-from app import auth, config, email, invites, users
+from app import account_requests, auth, config, email, invites, users
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +34,10 @@ class RefreshRequest(BaseModel):
 
 
 class PasswordResetRequest(BaseModel):
+    email: str = Field(min_length=3, max_length=254, pattern=EMAIL_PATTERN)
+
+
+class AccountRequest(BaseModel):
     email: str = Field(min_length=3, max_length=254, pattern=EMAIL_PATTERN)
 
 
@@ -139,6 +143,27 @@ async def register(credentials: Credentials, request: Request) -> TokenResponse:
             await invites.refund(redis, code)
         raise HTTPException(status_code=409, detail="email already registered")
     return await _issue(redis, user)
+
+
+@router.post("/account-request", status_code=202)
+async def request_account(body: AccountRequest, request: Request) -> Response:
+    """Ask an operator for an account, instead of holding an invite code.
+
+    Always 202, for the same reason ``/auth/password-reset/request`` is: a
+    different answer for an address that already has an account would make this
+    a second enumeration oracle, and the invite gate exists to close the first
+    one. The request is also suppressed silently when the address already asked
+    or the backlog is full — see ``app/account_requests.py``.
+
+    Nothing is created here. An operator approves it in the panel, and that is
+    where the account comes from.
+    """
+    created = await account_requests.create(_redis(request), body.email)
+    if created is None:
+        # No address in the log: the point of the 202 is that this endpoint
+        # says nothing about who is registered, and a log is a second surface.
+        logger.info("account request suppressed (duplicate or backlog full)")
+    return Response(status_code=202)
 
 
 @router.post("/login", response_model=LoginResponse)
