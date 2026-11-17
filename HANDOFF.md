@@ -8,7 +8,8 @@ exists, `ios/README.md`.
 **`main` is clean.** `main` is the PR #13 squash merge `0906161` plus docs
 follow-ups, then the three Android PRs described just below. The VPS was not
 redeployed for any of them — the backend image is unchanged throughout. See
-**Session log — 2026-11-16** below for what landed in the last session. The admin panel
+**Session log — 2026-11-17 — the five leaked secrets** below for what landed in
+the last session. The admin panel
 landed earlier as `e5ed2ad admin pagina en account creation`, on top of
 `7d26413 Eerste versie`; see **What landed in `e5ed2ad`** at the bottom for
 what that commit contains.
@@ -65,6 +66,62 @@ and it has been rotated (see **Session log — 2026-11-17**); still no operator
 password-change route (rotation is delete + `create_admin.py`); the
 email-verification decision; a reconnect backoff pass; accessibility; `/me`;
 blocks-cap atomicity; backups and monitoring on the box.
+
+## Session log — 2026-11-17 — the five leaked secrets: three rotated, logs scrubbed
+
+The `sed` that printed five secrets into the transcript was closed out. Three of
+the five are rotated and proven dead; the logs that held them are scrubbed. The
+other two are issued by Google and NIST and cannot be rotated from here — see
+**Still open**.
+
+**Where the values actually were.** Not just "the transcript": six files under
+`~/.vibe/logs/session/unified/`, in three session directories (`66df7ad0…` held
+all five, `c25619b5…` the NVD key, `84d366f7…` the SMTP password). **Zero
+occurrences in git history** — `git log --all -S` over every commit found
+nothing, so nothing reached GitHub. The exposure was local to this machine.
+
+**`JWT_SECRET`** — a fresh 48-byte urlsafe value generated on the box, written
+into `/home/thomas/dog/backend/.env` (backup `.env.bak-jwt-rot-20261117`), baked
+in with `docker compose up -d`. Proven by A/B: a token minted with the leaked
+value gets **401** from `GET /blocks`, one minted with the new value gets **200**.
+Container env and `.env` fingerprints match (`b21f2de7ec133ca1`). Every session
+issued before the rotation — the admin panel included — is now signed with a dead
+key.
+
+**`ADMIN_PANEL_PASSWORD`** — there is still no operator password-change route, so
+the rotation is delete-then-recreate: both admin keys deleted, `create_admin.py`
+re-run inside the container with the new password piped through `getpass` on
+stdin (never on a command line, never in shell history). New admin id
+`5ef53f83d44c4503a21fb05ad767576a`, `token_version` back to 1, audit log
+preserved. Verified two ways: scrypt against the Redis hash (`True`) and a real
+`POST /admin/auth/login` returning 200.
+
+**`CADDY_BASIC_AUTH_PASSWORD`** — hashed on the box with `caddy hash-password
+--bcrypt-cost 14` fed over stdin, swapped into `/etc/caddy/Caddyfile` (backup
+`Caddyfile.bak-auth-20261117`), `caddy validate` → *Valid configuration*,
+`systemctl reload caddy`. Verified over the public internet: no credentials →
+**401**, wrong password → **401**, new password → **303** (Caddy passes, FastAPI
+redirects), following the redirect → **200**. The repo's `deploy/Caddyfile` hash
+line was updated to match the deployment.
+
+**The scrub.** All six leaked values (two distinct `JWT_SECRET`s — the 11-16 one
+and the 11-17 one) replaced with `[REDACTED]` at byte level across the three
+session directories: 36 replacements in 7 files, 0 remaining, every JSON file
+still parses. A pattern sweep for `KEY=<16+ char token>` over the whole `~/.vibe`
+tree and the repo now returns **0**. One extra find: `~/.vibe/vibehistory` line
+55 held the NVD key from a message the user wrote in an earlier session —
+scrubbed too.
+
+**Still open.** `SMTP_PASSWORD` (a Gmail app password for
+`thomas.feyens@gmail.com`) and `NVD_API_KEY` are issued by Google and NIST, so
+they cannot be rotated from this machine: generate new ones and hand them over to
+install. The SMTP one matters more — app passwords work over IMAP as well as
+SMTP, and reset codes arrive in that mailbox. Both are scrubbed from disk now,
+but the values themselves are unchanged and were exposed for the length of this
+session.
+
+**Also still open**: `~/.ssh/authorized_keys` on the box is empty, so the Linux
+`thomas` password remains the only way in from the dev machine.
 
 ## Session log — 2026-11-17 — account requests: ask in the app, approve in the panel
 
@@ -146,8 +203,9 @@ access change.
 whose redaction covered only the `THOMAS_USER_PASSWORD` line — `JWT_SECRET`,
 `ADMIN_PANEL_PASSWORD`, `CADDY_BASIC_AUTH_PASSWORD`, `NVD_API_KEY` and
 `SMTP_PASSWORD`. Same failure mode as 2026-11-16 and the same local-only
-exposure (the Vibe session log on this machine). Not rotated in this session;
-the procedures are in the 2026-11-16 log.
+exposure (the Vibe session log on this machine). **Resolved later the same day**:
+three rotated and the logs scrubbed — see **Session log — 2026-11-17 — the five
+leaked secrets**; the SMTP and NVD values are still the originals.
 
 ## Session log — 2026-11-16 — SMTP live on the VPS, priority #1 closed
 
