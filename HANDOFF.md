@@ -5,7 +5,8 @@ first when picking the project back up. For what to build next, see
 `ROADMAP.md`; for the iOS plan in full, `IOS-PORT.md`; for the iOS code that
 exists, `ios/README.md`.
 
-**`main` is clean at `dbb74ca`.** Since the security-review session: PR #13
+**`main` is clean at `af8a9cc`**, the backup commit; the only thing on top
+of it is this note. Since the security-review session: PR #13
 (`0906161`, dependency scanners), the three Android PRs, the hardening pass
 (PRs #17-#19), the docs follow-up (#20), the backend efficiency pass (#21) and
 the DogWalk -> Mikywalk rebrand (#22). The backend image changed with #17-#19,
