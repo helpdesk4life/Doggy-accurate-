@@ -5,7 +5,7 @@ first when picking the project back up. For what to build next, see
 `ROADMAP.md`; for the iOS plan in full, `IOS-PORT.md`; for the iOS code that
 exists, `ios/README.md`.
 
-**`main` is clean at `6e38b89`.** Since the security-review session: PR #13
+**`main` is clean at `dbb74ca`.** Since the security-review session: PR #13
 (`0906161`, dependency scanners), the three Android PRs, the hardening pass
 (PRs #17-#19), the docs follow-up (#20), the backend efficiency pass (#21) and
 the DogWalk -> Mikywalk rebrand (#22). The backend image changed with #17-#19,
@@ -118,6 +118,49 @@ A Redis backup was taken first, at `/home/thomas/redis-2026-11-18-predeploy.tgz`
 (1.6 KB `dump.rdb` plus a 49 KB AOF). Admin sessions issued before PR #19 are
 invalidated by this deploy — sign in to the panel again.
 
+## Session log — 2026-11-18 — backups, and the `.env` files one `git add` away
+
+Two gaps from the "what else should I do" list, both closed. Neither touches the
+backend image, so nothing needs redeploying.
+
+### The account store now backs itself up
+
+`deploy/backup-redis.sh` (new) snapshots the persistent Redis volume and keeps 14
+days. It runs from `/etc/cron.d/mikywalk-backup` at 03:17 as `thomas`, who is in
+the `docker` group; output goes to `/home/thomas/backups/backup.log`.
+
+It uses `BGSAVE` and then `docker cp`s `/data/dump.rdb`, rather than tarring the
+volume. A tar of a live volume can capture the AOF mid-append, which restores as
+a torn command and leaves Redis refusing to start — the backup would look fine
+and be worthless. `BGSAVE` forks, so the script polls `rdb_bgsave_in_progress`
+for up to 60 s before copying; without that wait it would copy the previous
+snapshot and report success. The copied file is checked for the `REDIS` magic
+before it is gzipped, which catches the case that matters most: a snapshot of an
+empty dataset, kept as a backup that restores to nothing.
+
+Restore is deliberately still manual and is written out in `deploy/VPS.md` step
+12. The step that is easy to miss: `appendonlydir` must be removed, because with
+AOF enabled Redis prefers it over the RDB, so a stale AOF restores the old data
+and makes the backup look broken.
+
+Tested locally against the running stack: success path (10074 B, valid header),
+retention prune (a 30-day-old file deleted), and the missing-container path
+(exit 1, no partial file left behind).
+
+### `.env.*` was committable
+
+`.gitignore` had a bare `.env`, which matches that exact name and nothing else.
+The `.env.bak-*` copies made during the 2026-11-16 and 2026-11-17 rotations were
+therefore untracked-but-committable, and three of them were sitting in the VPS
+working tree holding `JWT_SECRET` and `SMTP_PASSWORD` — one `git add -A` from the
+repository. Added `.env.*` with `!.env.example` so the template stays tracked.
+Verified with `git check-ignore --no-index`: every `.env` variant ignored,
+`.env.example` still committable.
+
+The files themselves are still on the box. Deleting them is a separate call —
+they are the only record of the pre-rotation values, and the rotation is already
+proven live, so they can go.
+
 ## Session log — 2026-11-17 — security hardening pass (PRs #17, #18, #19)
 
 A full read-only review of the repo (backend, Android, iOS slice, deploy config),
@@ -219,7 +262,9 @@ password-change route (rotation is delete + `create_admin.py`)~~ — closed
 2026-11-17, see **Session log — 2026-11-17 — the operator password-change
 route**; the email-verification decision; ~~a reconnect backoff pass~~ — closed
 2026-11-17, see **Session log — 2026-11-17 — the reconnect backoff pass**;
-accessibility; `/me`; blocks-cap atomicity; backups and monitoring on the box.
+accessibility; `/me`; blocks-cap atomicity; ~~backups~~ — closed 2026-11-18, see
+**Session log — 2026-11-18 — backups, and the `.env` files one `git add` away**;
+monitoring on the box.
 
 ## Session log — 2026-11-17 — the reconnect backoff pass
 

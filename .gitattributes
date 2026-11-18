@@ -5,3 +5,4 @@
 # Pin the files that are copied to the VPS.
 deploy/Caddyfile text eol=lf
 deploy/verify.sh text eol=lf
+deploy/backup-redis.sh text eol=lf

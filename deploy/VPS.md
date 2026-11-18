@@ -433,8 +433,7 @@ cd ~/dog/backend && docker compose logs -f backend
 cd ~/dog && git pull && cd backend && docker compose up -d --build backend
 
 # back up the accounts. The geo index is disposable; the user store is not.
-docker run --rm -v backend_redis-data:/data -v "$PWD":/backup alpine \
-  tar czf /backup/redis-$(date +%F).tgz -C /data .
+bash ~/dog/deploy/backup-redis.sh
 ```
 
 Run that as `thomas`, not as `root`. The deploy key lives in
@@ -459,8 +458,33 @@ sudo bash ~/dog/deploy/verify.sh
 ```
 
 Caddy renews certificates on its own. `apt` upgrades itself via
-`unattended-upgrades`. Nothing else is scheduled — **there is no backup cron**,
-so the command above is manual until you add one.
+`unattended-upgrades`. The account store is backed up daily by
+`deploy/backup-redis.sh`, installed as `/etc/cron.d/mikywalk-backup`:
+
+```bash
+# 03:17 daily, as thomas (who is in the docker group). One line per run.
+17 3 * * * thomas /home/thomas/dog/deploy/backup-redis.sh >> /home/thomas/backups/backup.log 2>&1
+```
+
+Snapshots land in `/home/thomas/backups/redis-YYYY-MM-DD.rdb.gz` and are pruned
+after 14 days (`KEEP_DAYS`). The script exits non-zero on any failure, so a
+broken run shows up in `backup.log` instead of passing silently. It snapshots
+with `BGSAVE` rather than tarring the volume, because a tar of a live volume can
+capture the AOF mid-append and restore as a torn command.
+
+**Restoring** is the one thing this does not automate:
+
+```bash
+docker compose -f ~/dog/backend/docker-compose.yml stop backend redis
+gunzip -c /home/thomas/backups/redis-YYYY-MM-DD.rdb.gz > /tmp/dump.rdb
+docker run --rm -v backend_redis-data:/data -v /tmp:/restore alpine \
+  sh -c 'rm -rf /data/appendonlydir && cp /restore/dump.rdb /data/dump.rdb'
+docker compose -f ~/dog/backend/docker-compose.yml up -d redis backend
+```
+
+Dropping `appendonlydir` matters: with AOF enabled Redis prefers it over the
+RDB, so leaving a stale AOF in place restores the old data and looks like the
+backup did nothing.
 
 ## 13. CrowdSec (installed 2026-11-15)
 
@@ -534,5 +558,7 @@ banned from auth.log; `deploy/verify.sh` still passes every check.
   (Rotated once already, 2026-11-16 — the deployed hash, the repo's `deploy/Caddyfile`
   line, `.secrets/bcrypt.txt` and the secrets-file password all move together.
   Notes in the 2026-11-16 HANDOFF session log.)
-- **No backups.** See step 12.
+- ~~**No backups.**~~ Closed on 2026-11-18: `deploy/backup-redis.sh` runs daily
+  from `/etc/cron.d/mikywalk-backup`, keeps 14 days, and logs to
+  `/home/thomas/backups/backup.log`. Restore is still manual — see step 12.
 - **No monitoring.** If the container dies, nothing tells you.

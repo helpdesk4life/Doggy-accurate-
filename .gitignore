@@ -32,4 +32,11 @@ android/keystore.properties
 
 # Runtime secrets. backend/.env on the VPS holds JWT_SECRET, which is the one
 # value that makes every token in the deployment forgeable.
+#
+# `.env.*` is not redundant with `.env`: a bare `.env` pattern matches only that
+# exact name, so the `.env.bak-*` copies made during a secret rotation stayed
+# untracked-but-committable. Three of them sat in the VPS working tree holding
+# JWT_SECRET and SMTP_PASSWORD, one `git add -A` from the repository.
 .env
+.env.*
+!.env.example
