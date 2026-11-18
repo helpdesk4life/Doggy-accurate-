@@ -141,7 +141,7 @@ async def refresh(app) -> None:
 
 def reset_email_body(code: str, ttl_minutes: int) -> str:
     return (
-        "Someone asked to reset the password for your DogWalk account.\n\n"
+        "Someone asked to reset the password for your Mikywalk account.\n\n"
         f"Your code is: {code}\n\n"
         f"It expires in {ttl_minutes} minutes and can only be used once.\n"
         "If this was not you, ignore this message; your password has not changed.\n"
@@ -156,7 +156,7 @@ def approval_email_body() -> str:
     mail body would outlive the fifteen minutes a reset code is good for.
     """
     return (
-        "Your DogWalk account has been approved.\n\n"
+        "Your Mikywalk account has been approved.\n\n"
         'Open the app, tap "Forgot password?" and set a password of your own.\n\n'
         "That is the only way in: nobody, including the person who approved you, "
         "has a password for this account.\n"
@@ -165,7 +165,7 @@ def approval_email_body() -> str:
 
 def test_email_body(host: str) -> str:
     return (
-        "This is a test message from the DogWalk admin panel.\n\n"
+        "This is a test message from the Mikywalk admin panel.\n\n"
         f"It was sent through {host}, which is the server the panel is now "
         "configured to use. If you are reading it, password-reset codes will "
         "arrive the same way.\n"

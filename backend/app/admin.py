@@ -51,7 +51,7 @@ AUDIT_MAX_ENTRIES = 1000
 
 # Verified against when the address has no admin, so that "no such admin" and
 # "wrong password" cost the same. Computed once at import.
-_DUMMY_PASSWORD_HASH = auth.hash_password("dogwalk-dummy-admin-password-not-real")
+_DUMMY_PASSWORD_HASH = auth.hash_password("mikywalk-dummy-admin-password-not-real")
 
 
 class EmailTaken(Exception):
@@ -298,7 +298,7 @@ async def approve_request(
     try:
         await email_sender.send(
             to=account["email"],
-            subject="Your DogWalk account has been approved",
+            subject="Your Mikywalk account has been approved",
             body=email.approval_email_body(),
         )
     except Exception:

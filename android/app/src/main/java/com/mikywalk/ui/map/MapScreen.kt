@@ -1,0 +1,845 @@
+package com.mikywalk.ui.map
+
+import android.Manifest
+import android.content.Context
+import android.content.pm.PackageManager
+import android.os.Build
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
+import androidx.annotation.StringRes
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBarsPadding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Pets
+import androidx.compose.material.icons.outlined.Close
+import androidx.compose.material.icons.outlined.History
+import androidx.compose.material.icons.outlined.MyLocation
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.HorizontalDivider
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.SmallFloatingActionButton
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.res.colorResource
+import androidx.compose.ui.res.pluralStringResource
+import androidx.compose.ui.res.stringResource
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.input.ImeAction
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import androidx.core.content.ContextCompat
+import androidx.hilt.lifecycle.viewmodel.compose.hiltViewModel
+import androidx.lifecycle.compose.collectAsStateWithLifecycle
+import com.mikywalk.R
+import com.mikywalk.data.SettingsStore
+import com.mikywalk.model.BlockedWalker
+import com.mikywalk.model.ConnectionState
+import com.mikywalk.model.DogRelationship
+import com.mikywalk.model.MarkedDog
+import com.mikywalk.model.NearbyWalker
+import com.mikywalk.model.WalkSummary
+import com.mikywalk.service.LocationTrackingService
+import java.time.Instant
+import java.time.LocalDateTime
+import java.time.ZoneId
+import java.time.format.DateTimeFormatter
+import java.time.format.FormatStyle
+import java.util.Locale
+import kotlin.math.roundToInt
+
+@Composable
+fun MapScreen(viewModel: MapViewModel = hiltViewModel()) {
+    val state by viewModel.uiState.collectAsStateWithLifecycle()
+    val deleteState by viewModel.deleteAccount.collectAsStateWithLifecycle()
+    val blockState by viewModel.blockState.collectAsStateWithLifecycle()
+    val walks by viewModel.walks.collectAsStateWithLifecycle()
+    val context = LocalContext.current
+
+    var locationGranted by remember { mutableStateOf(hasLocationPermission(context)) }
+    var showSettings by remember { mutableStateOf(false) }
+    var showHistory by remember { mutableStateOf(false) }
+    var showDeleteAccount by remember { mutableStateOf(false) }
+    var recenterSignal by remember { mutableIntStateOf(0) }
+    var markTarget by remember { mutableStateOf<NearbyWalker?>(null) }
+
+    val permissionLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.RequestMultiplePermissions(),
+    ) {
+        locationGranted = hasLocationPermission(context)
+    }
+
+    Box(modifier = Modifier.fillMaxSize()) {
+        MapLibreMap(
+            self = state.self,
+            selfName = state.displayName,
+            nearby = state.nearby,
+            marked = state.markedDogs,
+            radiusMeters = state.radiusMeters,
+            warningDistanceMeters = state.warningDistanceMeters.toDouble(),
+            recenterSignal = recenterSignal,
+            onWalkerTapped = { markTarget = it },
+            modifier = Modifier.fillMaxSize(),
+        )
+
+        StatusPill(
+            state = state,
+            modifier = Modifier
+                .align(Alignment.TopCenter)
+                .statusBarsPadding()
+                .padding(top = 12.dp),
+        )
+
+        SmallFloatingActionButton(
+            onClick = { recenterSignal++ },
+            modifier = Modifier
+                .align(Alignment.BottomEnd)
+                .navigationBarsPadding()
+                .padding(end = 16.dp, bottom = 220.dp),
+            containerColor = MaterialTheme.colorScheme.surface,
+        ) {
+            Icon(
+                imageVector = Icons.Outlined.MyLocation,
+                contentDescription = stringResource(R.string.action_recenter),
+            )
+        }
+
+        Surface(
+            modifier = Modifier
+                .align(Alignment.BottomCenter)
+                .fillMaxWidth()
+                .navigationBarsPadding()
+                .padding(16.dp),
+            shape = RoundedCornerShape(24.dp),
+            tonalElevation = 3.dp,
+            shadowElevation = 8.dp,
+        ) {
+            Column(modifier = Modifier.padding(20.dp)) {
+                if (locationGranted) {
+                    WalkControls(
+                        state = state,
+                        onToggleTracking = {
+                            if (state.isTracking) {
+                                LocationTrackingService.stop(context)
+                            } else {
+                                LocationTrackingService.start(context)
+                            }
+                        },
+                        onOpenSettings = { showSettings = true },
+                        onOpenHistory = { showHistory = true },
+                    )
+                } else {
+                    PermissionPrompt(
+                        onRequest = { permissionLauncher.launch(requiredPermissions()) },
+                    )
+                }
+            }
+        }
+    }
+
+    if (showHistory) {
+        HistoryDialog(
+            walks = walks,
+            onRemove = viewModel::removeWalk,
+            onDismiss = { showHistory = false },
+        )
+    }
+
+    if (showSettings) {
+        SettingsDialog(
+            initialUrl = state.backendUrl,
+            initialName = state.displayName,
+            initialWarningDistance = state.warningDistanceMeters,
+            email = state.email,
+            markedDogs = state.markedDogs,
+            blocked = state.blocked,
+            blockState = blockState,
+            onDismiss = { showSettings = false },
+            onSave = { url, name, warningDistance ->
+                viewModel.saveSettings(url, name, warningDistance)
+                showSettings = false
+            },
+            onClearRelationship = viewModel::clearRelationship,
+            onUnblock = viewModel::unblock,
+            onSignOut = {
+                showSettings = false
+                viewModel.signOut()
+            },
+            onDeleteAccount = {
+                showSettings = false
+                showDeleteAccount = true
+            },
+        )
+    }
+
+    // A block lands asynchronously, so the dialog closes when the server has
+    // confirmed it rather than when the button was tapped.
+    LaunchedEffect(state.blocked, markTarget) {
+        val target = markTarget ?: return@LaunchedEffect
+        if (state.blocked.any { it.id == target.id }) markTarget = null
+    }
+
+    markTarget?.let { walker ->
+        MarkDogDialog(
+            walker = walker,
+            current = state.markedDogs[walker.id]?.relationship,
+            blockState = blockState,
+            onSelect = { relationship ->
+                viewModel.setRelationship(walker.id, walker.name, relationship)
+                markTarget = null
+            },
+            onClear = {
+                viewModel.clearRelationship(walker.id)
+                markTarget = null
+            },
+            onBlock = { viewModel.block(walker) },
+            onDismiss = {
+                markTarget = null
+                viewModel.clearBlockError()
+            },
+        )
+    }
+
+    if (showDeleteAccount) {
+        DeleteAccountDialog(
+            state = deleteState,
+            onConfirm = viewModel::deleteAccount,
+            onDismiss = {
+                showDeleteAccount = false
+                viewModel.clearDeleteError()
+            },
+        )
+    }
+}
+
+@Composable
+private fun StatusPill(state: MapUiState, modifier: Modifier = Modifier) {
+    val label = when {
+        !state.isTracking -> stringResource(R.string.status_idle)
+        state.connection == ConnectionState.CONNECTED -> stringResource(R.string.status_live)
+        state.connection == ConnectionState.CONNECTING -> stringResource(R.string.status_connecting)
+        else -> stringResource(R.string.status_offline)
+    }
+    val dotColor = when {
+        !state.isTracking -> MaterialTheme.colorScheme.outline
+        state.connection == ConnectionState.CONNECTED -> MaterialTheme.colorScheme.primary
+        state.connection == ConnectionState.CONNECTING -> MaterialTheme.colorScheme.tertiary
+        else -> MaterialTheme.colorScheme.error
+    }
+
+    Surface(
+        modifier = modifier,
+        shape = RoundedCornerShape(percent = 50),
+        color = MaterialTheme.colorScheme.surface,
+        tonalElevation = 3.dp,
+        shadowElevation = 4.dp,
+    ) {
+        Row(
+            modifier = Modifier.padding(horizontal = 16.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically,
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+        ) {
+            Box(
+                modifier = Modifier
+                    .size(8.dp)
+                    .clip(CircleShape)
+                    .background(dotColor),
+            )
+            Text(text = label, style = MaterialTheme.typography.labelLarge)
+            if (state.nearby.isNotEmpty()) {
+                Text(
+                    text = stringResource(R.string.nearby_count, state.nearby.size),
+                    style = MaterialTheme.typography.labelLarge,
+                    color = MaterialTheme.colorScheme.secondary,
+                )
+            }
+        }
+    }
+}
+
+@Composable
+private fun WalkControls(
+    state: MapUiState,
+    onToggleTracking: () -> Unit,
+    onOpenSettings: () -> Unit,
+    onOpenHistory: () -> Unit,
+) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+        Icon(
+            imageVector = Icons.Filled.Pets,
+            contentDescription = null,
+            tint = MaterialTheme.colorScheme.primary,
+        )
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            Text(
+                text = stringResource(R.string.app_name),
+                style = MaterialTheme.typography.titleLarge,
+                fontWeight = FontWeight.SemiBold,
+            )
+            Text(
+                text = if (state.isTracking) {
+                    stringResource(R.string.status_live)
+                } else {
+                    stringResource(R.string.status_idle)
+                },
+                style = MaterialTheme.typography.bodyMedium,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+        }
+        IconButton(onClick = onOpenHistory) {
+            Icon(
+                imageVector = Icons.Outlined.History,
+                contentDescription = stringResource(R.string.action_history),
+            )
+        }
+        IconButton(onClick = onOpenSettings) {
+            Icon(
+                imageVector = Icons.Outlined.Settings,
+                contentDescription = stringResource(R.string.action_settings),
+            )
+        }
+    }
+
+    Spacer(Modifier.height(16.dp))
+
+    Button(
+        onClick = onToggleTracking,
+        modifier = Modifier
+            .fillMaxWidth()
+            .height(52.dp),
+        colors = if (state.isTracking) {
+            ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+        } else {
+            ButtonDefaults.buttonColors()
+        },
+    ) {
+        Text(
+            text = if (state.isTracking) {
+                stringResource(R.string.action_stop)
+            } else {
+                stringResource(R.string.action_start)
+            },
+        )
+    }
+
+    if (state.nearby.isNotEmpty()) {
+        Spacer(Modifier.height(12.dp))
+        Text(
+            text = stringResource(R.string.nearby_count, state.nearby.size),
+            style = MaterialTheme.typography.bodyMedium,
+            color = MaterialTheme.colorScheme.secondary,
+        )
+    }
+}
+
+@Composable
+private fun PermissionPrompt(onRequest: () -> Unit) {
+    Text(
+        text = stringResource(R.string.permission_rationale_title),
+        style = MaterialTheme.typography.titleMedium,
+    )
+    Spacer(Modifier.height(8.dp))
+    Text(
+        text = stringResource(R.string.permission_rationale_body),
+        style = MaterialTheme.typography.bodyMedium,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    Spacer(Modifier.height(16.dp))
+    Button(onClick = onRequest, modifier = Modifier.fillMaxWidth()) {
+        Text(stringResource(R.string.permission_grant))
+    }
+}
+
+/**
+ * Finished walks, newest first: when, how long, how far, and which dogs came
+ * close. One row per walk with a remove button; the list itself is capped in
+ * [com.mikywalk.data.history.WalkHistoryStore.MAX_ENTRIES].
+ */
+@Composable
+private fun HistoryDialog(
+    walks: List<WalkSummary>,
+    onRemove: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.history_title)) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                if (walks.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.history_empty),
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+                walks.forEach { walk ->
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        verticalAlignment = Alignment.CenterVertically,
+                    ) {
+                        Column(modifier = Modifier.weight(1f)) {
+                            Text(
+                                text = formatWalkDate(walk.startedAtMillis),
+                                style = MaterialTheme.typography.bodyMedium,
+                                fontWeight = FontWeight.SemiBold,
+                            )
+                            Text(
+                                text = stringResource(
+                                    R.string.history_stats,
+                                    formatDuration(walk.durationMillis),
+                                    formatDistance(walk.distanceMeters),
+                                    pluralStringResource(
+                                        R.plurals.history_dogs_met,
+                                        walk.dogsMet.size,
+                                        walk.dogsMet.size,
+                                    ),
+                                ),
+                                style = MaterialTheme.typography.bodySmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            )
+                            if (walk.dogsMet.isNotEmpty()) {
+                                Text(
+                                    text = walk.dogsMet.joinToString(", ") { it.name },
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.secondary,
+                                )
+                            }
+                        }
+                        IconButton(onClick = { onRemove(walk.id) }) {
+                            Icon(
+                                imageVector = Icons.Outlined.Close,
+                                contentDescription = stringResource(R.string.history_delete),
+                            )
+                        }
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.settings_cancel))
+            }
+        },
+    )
+}
+
+private fun formatWalkDate(millis: Long): String =
+    LocalDateTime.ofInstant(Instant.ofEpochMilli(millis), ZoneId.systemDefault())
+        .format(DateTimeFormatter.ofLocalizedDateTime(FormatStyle.SHORT, FormatStyle.SHORT))
+
+private fun formatDuration(millis: Long): String {
+    val totalSeconds = millis / 1_000
+    val hours = totalSeconds / 3_600
+    val minutes = totalSeconds % 3_600 / 60
+    val seconds = totalSeconds % 60
+    return when {
+        hours > 0 -> "$hours h ${minutes.toString().padStart(2, '0')} min"
+        minutes > 0 -> "$minutes min"
+        else -> "$seconds s"
+    }
+}
+
+private fun formatDistance(meters: Double): String =
+    if (meters < 1_000) "${meters.roundToInt()} m"
+    else String.format(Locale.getDefault(), "%.1f km", meters / 1_000.0)
+
+@Composable
+private fun SettingsDialog(
+    initialUrl: String,
+    initialName: String,
+    initialWarningDistance: Int,
+    email: String,
+    markedDogs: Map<String, MarkedDog>,
+    blocked: List<BlockedWalker>,
+    blockState: BlockState,
+    onDismiss: () -> Unit,
+    onSave: (String, String, Int) -> Unit,
+    onClearRelationship: (String) -> Unit,
+    onUnblock: (String) -> Unit,
+    onSignOut: () -> Unit,
+    onDeleteAccount: () -> Unit,
+) {
+    var url by remember { mutableStateOf(initialUrl) }
+    var name by remember { mutableStateOf(initialName) }
+    var warningDistance by remember { mutableIntStateOf(initialWarningDistance) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_title)) },
+        text = {
+            Column(
+                modifier = Modifier.verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(12.dp),
+            ) {
+                OutlinedTextField(
+                    value = url,
+                    onValueChange = { url = it },
+                    label = { Text(stringResource(R.string.settings_backend_url)) },
+                    singleLine = true,
+                )
+                OutlinedTextField(
+                    value = name,
+                    onValueChange = { name = it },
+                    label = { Text(stringResource(R.string.settings_display_name)) },
+                    singleLine = true,
+                )
+
+                Text(
+                    text = stringResource(R.string.settings_warning_distance),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                    SettingsStore.WARNING_DISTANCE_OPTIONS.forEach { meters ->
+                        FilterChip(
+                            selected = warningDistance == meters,
+                            onClick = { warningDistance = meters },
+                            label = {
+                                Text(
+                                    stringResource(
+                                        R.string.settings_warning_distance_value,
+                                        meters,
+                                    ),
+                                )
+                            },
+                        )
+                    }
+                }
+                Text(
+                    text = stringResource(R.string.settings_warning_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+
+                HorizontalDivider()
+                Text(
+                    text = stringResource(R.string.settings_marked_title),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                if (markedDogs.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.settings_marked_empty),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    NamedGroup(
+                        title = stringResource(R.string.settings_friends),
+                        entries = markedDogs.values
+                            .filter { it.relationship == DogRelationship.FRIEND }
+                            .map { it.id to it.name },
+                        removeLabelRes = R.string.settings_marked_remove,
+                        onRemove = onClearRelationship,
+                    )
+                    NamedGroup(
+                        title = stringResource(R.string.settings_disliked),
+                        entries = markedDogs.values
+                            .filter { it.relationship == DogRelationship.DISLIKED }
+                            .map { it.id to it.name },
+                        removeLabelRes = R.string.settings_marked_remove,
+                        onRemove = onClearRelationship,
+                    )
+                }
+
+                HorizontalDivider()
+                Text(
+                    text = stringResource(R.string.settings_blocked_title),
+                    style = MaterialTheme.typography.labelLarge,
+                )
+                if (blocked.isEmpty()) {
+                    Text(
+                        text = stringResource(R.string.settings_blocked_empty),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                } else {
+                    NamedGroup(
+                        title = stringResource(R.string.settings_blocked_group),
+                        entries = blocked.map { it.id to it.name },
+                        removeLabelRes = R.string.settings_blocked_unblock,
+                        onRemove = onUnblock,
+                    )
+                }
+                if (blockState.failed) {
+                    Text(
+                        text = stringResource(R.string.settings_blocked_error),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+
+                if (email.isNotBlank()) {
+                    HorizontalDivider()
+                    Text(
+                        text = stringResource(R.string.auth_signed_in_as, email),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                    TextButton(onClick = onSignOut) {
+                        Text(stringResource(R.string.settings_sign_out))
+                    }
+                    TextButton(onClick = onDeleteAccount) {
+                        Text(
+                            text = stringResource(R.string.settings_delete_account),
+                            color = MaterialTheme.colorScheme.error,
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = { onSave(url, name, warningDistance) }) {
+                Text(stringResource(R.string.settings_save))
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.settings_cancel))
+            }
+        },
+    )
+}
+
+/**
+ * One named group inside the settings sheet, as (id, name) pairs.
+ *
+ * Used for both the relationship groups and the block list: they differ only in
+ * the wording of the remove button. Empty groups render nothing, so the sheet
+ * does not grow headings for lists that have nothing in them.
+ */
+@Composable
+private fun NamedGroup(
+    title: String,
+    entries: List<Pair<String, String>>,
+    @StringRes removeLabelRes: Int,
+    onRemove: (String) -> Unit,
+) {
+    if (entries.isEmpty()) return
+
+    Text(
+        text = title,
+        style = MaterialTheme.typography.bodySmall,
+        color = MaterialTheme.colorScheme.onSurfaceVariant,
+    )
+    entries.sortedBy { it.second.lowercase() }.forEach { (id, name) ->
+        Row(
+            modifier = Modifier.fillMaxWidth(),
+            verticalAlignment = Alignment.CenterVertically,
+        ) {
+            Text(
+                text = name,
+                style = MaterialTheme.typography.bodyMedium,
+                modifier = Modifier.weight(1f),
+            )
+            IconButton(onClick = { onRemove(id) }) {
+                Icon(
+                    imageVector = Icons.Outlined.Close,
+                    contentDescription = stringResource(removeLabelRes, name),
+                )
+            }
+        }
+    }
+}
+
+/**
+ * Mark a neighbour as liked or disliked, or block them.
+ *
+ * The relationship is stored on this device only. Nothing about it is sent to the
+ * server, so the social graph cannot leak from the backend. Blocking is the
+ * exception and is deliberately set apart: it goes to the server, because the
+ * point of it is that the other walker stops receiving our bearing.
+ */
+@Composable
+private fun MarkDogDialog(
+    walker: NearbyWalker,
+    current: DogRelationship?,
+    blockState: BlockState,
+    onSelect: (DogRelationship) -> Unit,
+    onClear: () -> Unit,
+    onBlock: () -> Unit,
+    onDismiss: () -> Unit,
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.mark_title, walker.name)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                Text(
+                    text = stringResource(R.string.mark_body),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                Button(
+                    onClick = { onSelect(DogRelationship.FRIEND) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colorResource(R.color.marker_friend),
+                    ),
+                ) {
+                    Text(stringResource(R.string.mark_friend))
+                }
+                Button(
+                    onClick = { onSelect(DogRelationship.DISLIKED) },
+                    modifier = Modifier.fillMaxWidth(),
+                    colors = ButtonDefaults.buttonColors(
+                        containerColor = colorResource(R.color.marker_disliked),
+                    ),
+                ) {
+                    Text(stringResource(R.string.mark_disliked))
+                }
+
+                HorizontalDivider()
+                Text(
+                    text = stringResource(R.string.mark_block_hint),
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                TextButton(
+                    onClick = onBlock,
+                    modifier = Modifier.fillMaxWidth(),
+                    enabled = !blockState.isBusy,
+                ) {
+                    Text(
+                        text = stringResource(R.string.mark_block),
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+                if (blockState.failed) {
+                    Text(
+                        text = stringResource(R.string.mark_block_error),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            if (current != null) {
+                TextButton(onClick = onClear) {
+                    Text(stringResource(R.string.mark_clear))
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.mark_cancel))
+            }
+        },
+    )
+}
+
+/**
+ * Confirmation for account deletion.
+ *
+ * The password is required as well as the session: an unlocked phone should not
+ * be enough to destroy someone's account.
+ */
+@Composable
+private fun DeleteAccountDialog(
+    state: DeleteAccountState,
+    onConfirm: (String) -> Unit,
+    onDismiss: () -> Unit,
+) {
+    var password by remember { mutableStateOf("") }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text(stringResource(R.string.settings_delete_account)) },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                Text(
+                    text = stringResource(R.string.settings_delete_account_body),
+                    style = MaterialTheme.typography.bodyMedium,
+                )
+                OutlinedTextField(
+                    value = password,
+                    onValueChange = { password = it },
+                    label = { Text(stringResource(R.string.settings_delete_account_password)) },
+                    singleLine = true,
+                    enabled = !state.isBusy,
+                    visualTransformation = PasswordVisualTransformation(),
+                    keyboardOptions = KeyboardOptions(
+                        keyboardType = KeyboardType.Password,
+                        imeAction = ImeAction.Done,
+                    ),
+                    modifier = Modifier.fillMaxWidth(),
+                )
+                state.error?.let {
+                    Text(
+                        text = stringResource(R.string.settings_delete_account_error),
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.error,
+                    )
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = { onConfirm(password) },
+                enabled = !state.isBusy && password.isNotBlank(),
+            ) {
+                Text(
+                    text = stringResource(R.string.settings_delete_account_confirm),
+                    color = MaterialTheme.colorScheme.error,
+                )
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text(stringResource(R.string.settings_cancel))
+            }
+        },
+    )
+}
+
+private fun requiredPermissions(): Array<String> = buildList {    add(Manifest.permission.ACCESS_FINE_LOCATION)
+    add(Manifest.permission.ACCESS_COARSE_LOCATION)
+    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+        add(Manifest.permission.POST_NOTIFICATIONS)
+    }
+}.toTypedArray()
+
+private fun hasLocationPermission(context: Context): Boolean =
+    ContextCompat.checkSelfPermission(
+        context,
+        Manifest.permission.ACCESS_FINE_LOCATION,
+    ) == PackageManager.PERMISSION_GRANTED

@@ -41,11 +41,11 @@ val keystoreProperties = Properties().apply {
 }
 
 android {
-    namespace = "com.dogwalk"
+    namespace = "com.mikywalk"
     compileSdk = 36
 
     defaultConfig {
-        applicationId = "com.dogwalk"
+        applicationId = "com.mikywalk"
         minSdk = 26
         targetSdk = 36
         versionCode = 1

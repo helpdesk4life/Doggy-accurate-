@@ -15,13 +15,13 @@
 
    ```bash
    # backend/.env
-   DOGWALK_ENV=production
+   MIKYWALK_ENV=production
    JWT_SECRET=<generate: python -c "import secrets; print(secrets.token_urlsafe(48))">
    PUBLIC_BASE_URL=https://your-host.example
    ALLOW_LOGGING_EMAIL=1        # only while EMAIL_SENDER=logging; reset codes then land in the logs
    ```
 
-   `DOGWALK_ENV` anything other than `development` makes `Settings.validate()` refuse to boot with the built-in dev `JWT_SECRET`.
+   `MIKYWALK_ENV` anything other than `development` makes `Settings.validate()` refuse to boot with the built-in dev `JWT_SECRET`.
 
 2. **Start services:**
 
@@ -84,9 +84,9 @@
 4. **Device permissions & network:** Grant on the emulator (a `pm clear` wipes them):
 
    ```bash
-   adb shell pm grant com.dogwalk android.permission.ACCESS_FINE_LOCATION
-   adb shell pm grant com.dogwalk android.permission.ACCESS_COARSE_LOCATION
-   adb shell pm grant com.dogwalk android.permission.POST_NOTIFICATIONS
+   adb shell pm grant com.mikywalk android.permission.ACCESS_FINE_LOCATION
+   adb shell pm grant com.mikywalk android.permission.ACCESS_COARSE_LOCATION
+   adb shell pm grant com.mikywalk android.permission.POST_NOTIFICATIONS
    ```
 
    The app needs fine location, notifications and foreground-service-location at runtime; it asks on first walk. Map tiles load from `https://maps.thomasfeyens.be/benelux.pmtiles` (absolute URL in `android/app/src/main/assets/style.json`), so even a local backend needs internet for the basemap.

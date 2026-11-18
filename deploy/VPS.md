@@ -1,4 +1,4 @@
-# Deploying DogWalk to the VPS
+# Deploying Mikywalk to the VPS
 
 Target: `207.180.240.29`, Ubuntu, root only.
 Result: a non-root sudo user, root SSH disabled, two HTTPS hostnames.
@@ -66,13 +66,13 @@ Only once step 1's check has passed.
 **The filename matters.** `sshd` uses the *first* value it sees for each keyword,
 and it reads `sshd_config.d/*.conf` in lexical order. Cloud images ship
 `50-cloud-init.conf`, which on many providers contains `PasswordAuthentication yes`.
-A file named `99-dogwalk.conf` sorts after it and is therefore **silently ignored**:
+A file named `99-mikywalk.conf` sorts after it and is therefore **silently ignored**:
 you reload, see no error, and are still accepting passwords. `00-` sorts first.
 
 ```bash
 ls /etc/ssh/sshd_config.d/          # expect 50-cloud-init.conf on a cloud image
 
-cat > /etc/ssh/sshd_config.d/00-dogwalk.conf <<'EOF'
+cat > /etc/ssh/sshd_config.d/00-mikywalk.conf <<'EOF'
 PermitRootLogin no
 PasswordAuthentication no
 KbdInteractiveAuthentication no
@@ -187,19 +187,19 @@ read-only, so a compromised server cannot reach anything else in the account.
 On the VPS, as `thomas`:
 
 ```bash
-ssh-keygen -t ed25519 -C "dogwalk-vps" -f ~/.ssh/github_dogwalk -N ""
-cat ~/.ssh/github_dogwalk.pub
+ssh-keygen -t ed25519 -C "mikywalk-vps" -f ~/.ssh/github_mikywalk -N ""
+cat ~/.ssh/github_mikywalk.pub
 ```
 
 Copy that line. In GitHub: **repo → Settings → Deploy keys → Add deploy key**,
-title `dogwalk-vps`, paste the key, leave **Allow write access** unchecked.
+title `mikywalk-vps`, paste the key, leave **Allow write access** unchecked.
 
 Then, still on the VPS:
 
 ```bash
 cat >> ~/.ssh/config <<'EOF'
 Host github.com
-  IdentityFile ~/.ssh/github_dogwalk
+  IdentityFile ~/.ssh/github_mikywalk
   IdentitiesOnly yes
 EOF
 chmod 600 ~/.ssh/config
@@ -236,7 +236,7 @@ Updates are then a plain `git pull`. No bundle, no `scp`.
 cd ~/dog/backend
 
 cat > .env <<EOF
-DOGWALK_ENV=production
+MIKYWALK_ENV=production
 JWT_SECRET=$(python3 -c "import secrets; print(secrets.token_urlsafe(48))")
 PUBLIC_BASE_URL=https://backend.thomasfeyens.be
 ALLOW_LOGGING_EMAIL=1
@@ -253,7 +253,7 @@ is the volatile geo index (`GEO_REDIS_URL` points the backend at it): no AOF, no
 volume, so live positions never touch disk. `redis` keeps AOF, because accounts
 must survive a restart.
 
-`DOGWALK_ENV=production` turns on the strict startup checks. The backend will
+`MIKYWALK_ENV=production` turns on the strict startup checks. The backend will
 refuse to boot if `JWT_SECRET` is still the public development value, or if
 `ALLOW_LOGGING_EMAIL` is missing — both are deliberate. `ALLOW_LOGGING_EMAIL=1`
 is you stating that this box's logs are readable only by you; delete it the day
@@ -285,7 +285,7 @@ SMTP_HOST=smtp.resend.com
 SMTP_PORT=587
 SMTP_USERNAME=resend
 SMTP_PASSWORD=re_your_api_key
-SMTP_FROM=DogWalk <no-reply@yourdomain.example>
+SMTP_FROM=Mikywalk <no-reply@yourdomain.example>
 SMTP_SECURITY=starttls
 ```
 
@@ -438,7 +438,7 @@ docker run --rm -v backend_redis-data:/data -v "$PWD":/backup alpine \
 ```
 
 Run that as `thomas`, not as `root`. The deploy key lives in
-`/home/thomas/.ssh/github_dogwalk` and the repo is owned by `thomas`; root has
+`/home/thomas/.ssh/github_mikywalk` and the repo is owned by `thomas`; root has
 neither the key nor the `Host github.com` entry in `~/.ssh/config`, so a `git
 pull` from a root shell fails with `Permission denied (publickey)`. That reads
 like a missing or revoked deploy key and sends you looking at GitHub, but it is

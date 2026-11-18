@@ -1,4 +1,4 @@
-"""End-to-end test of the DogWalk backend running in Docker against real Redis."""
+"""End-to-end test of the Mikywalk backend running in Docker against real Redis."""
 import asyncio, json, sys, uuid
 import websockets
 

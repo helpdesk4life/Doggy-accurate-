@@ -54,7 +54,7 @@ services:
       SWEEP_INTERVAL_SECONDS: "5"
       # Anything other than development makes the backend refuse to boot with the
       # public development secret. See app/config.py.
-      DOGWALK_ENV: ${DOGWALK_ENV:-development}
+      MIKYWALK_ENV: ${MIKYWALK_ENV:-development}
       # Override this in a .env file or the shell before exposing the service.
       JWT_SECRET: ${JWT_SECRET:-dev-insecure-secret-change-me-0123456789}
       PUBLIC_BASE_URL: ${PUBLIC_BASE_URL:-http://localhost:8000}

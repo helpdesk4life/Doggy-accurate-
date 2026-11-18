@@ -1,4 +1,4 @@
-# DogWalk
+# Mikywalk
 
 A dog-walking app that tells you when another walker comes within 500 m.
 
@@ -61,7 +61,7 @@ The walk socket is throttled in code: 20 handshakes/minute per client IP (checke
 
 | Variable | Default | Meaning |
 | --- | --- | --- |
-| `DOGWALK_ENV` | `development` | Deployment name. Anything outside `development`/`dev`/`local`/`test` gets the strict startup checks |
+| `MIKYWALK_ENV` | `development` | Deployment name. Anything outside `development`/`dev`/`local`/`test` gets the strict startup checks |
 | `REDIS_URL` | `redis://localhost:6379/0` | Redis connection |
 | `GEO_REDIS_URL` | _(empty = same as `REDIS_URL`)_ | Separate Redis for the disposable geo index. Point it at an instance with persistence off so live GPS positions never reach disk |
 | `PROXIMITY_RADIUS_M` | `500` | Alert radius in metres |
@@ -91,7 +91,7 @@ The walk socket is throttled in code: 20 handshakes/minute per client IP (checke
 secret is still the built-in one or is shorter than 32 bytes — a warning is not
 enough, because a deployment that logs a warning and carries on is a deployment
 where anyone who has read this repository can mint a token for any account. Set
-`DOGWALK_ENV=development` if the machine really is a development machine.
+`MIKYWALK_ENV=development` if the machine really is a development machine.
 
 `DISTANCE_QUANTUM_M` and `BEARING_QUANTUM_DEG` are the privacy budget for
 proximity alerts; see [Privacy](#privacy). Setting either to `0` disables
@@ -113,7 +113,7 @@ SMTP_HOST=smtp.resend.com
 SMTP_PORT=587
 SMTP_USERNAME=resend
 SMTP_PASSWORD=re_your_api_key
-SMTP_FROM=DogWalk <no-reply@yourdomain.example>
+SMTP_FROM=Mikywalk <no-reply@yourdomain.example>
 SMTP_SECURITY=starttls
 ```
 
@@ -514,7 +514,7 @@ Generate the keystore yourself:
 
 ```bash
 keytool -genkeypair -v -keystore release.jks -keyalg RSA -keysize 4096 \
-  -validity 10000 -alias dogwalk
+  -validity 10000 -alias mikywalk
 ```
 
 With the file present the release build produces a signed `app-release.apk`.
@@ -637,9 +637,9 @@ states, each with its own marker colour, notification channel and sound:
 
 | State | Marker | Channel | Sound | Vibration |
 |---|---|---|---|---|
-| Not marked | amber `#E0A030` | `dogwalk_proximity` | system notification tone | original pattern |
-| Likes | green `#2E9E5B` | `dogwalk_proximity_friend` | bundled rising two-note chime | short double tap |
-| Does not like | red `#C62828` | `dogwalk_proximity_disliked` | bundled falling two-note alarm | long triple buzz |
+| Not marked | amber `#E0A030` | `mikywalk_proximity` | system notification tone | original pattern |
+| Likes | green `#2E9E5B` | `mikywalk_proximity_friend` | bundled rising two-note chime | short double tap |
+| Does not like | red `#C62828` | `mikywalk_proximity_disliked` | bundled falling two-note alarm | long triple buzz |
 
 The relationship is stored on the device only, in `SharedPreferences` under
 `marked_dogs`, as a JSON list of `{id, name, relationship}`. **Nothing about it is ever
@@ -752,7 +752,7 @@ the backend directly on port 8000, so they do not need the Caddy CA.
   layers, so it needs no glyph server; name labels are Compose overlays.
 - Tokens are stored in `SecurePrefs`, which encrypts each value with a
   Keystore-backed AES-GCM key (`AES/GCM/NoPadding`, 256-bit, alias
-  `dogwalk_auth_key`) and writes `iv:ciphertext` base64. A value that fails to
+  `mikywalk_auth_key`) and writes `iv:ciphertext` base64. A value that fails to
   decrypt is dropped rather than crashing the app. `EncryptedSharedPreferences`
   was the obvious choice but is deprecated in `androidx.security`.
 - `android:allowBackup="false"` and `fullBackupContent="false"` are set, so the

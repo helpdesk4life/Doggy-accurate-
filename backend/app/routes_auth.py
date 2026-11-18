@@ -325,7 +325,7 @@ async def request_password_reset(body: PasswordResetRequest, request: Request) -
         try:
             await request.app.state.email_sender.send(
                 to=user["email"],
-                subject="Your DogWalk password reset code",
+                subject="Your Mikywalk password reset code",
                 body=email.reset_email_body(code, users.RESET_TTL_SECONDS // 60),
             )
         except Exception:

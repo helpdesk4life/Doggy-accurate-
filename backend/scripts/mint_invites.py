@@ -28,7 +28,7 @@ from app import invites  # noqa: E402
 
 
 async def main() -> int:
-    parser = argparse.ArgumentParser(description="Mint DogWalk invite codes.")
+    parser = argparse.ArgumentParser(description="Mint Mikywalk invite codes.")
     parser.add_argument("--count", type=int, default=1, help="how many to mint (default 1)")
     parser.add_argument("--list", action="store_true", help="show the unused count and exit")
     parser.add_argument(

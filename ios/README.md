@@ -1,4 +1,4 @@
-# DogWalk for iOS
+# Mikywalk for iOS
 
 The background strategy, implemented. This is not a complete app — it is the
 part of the port that decides whether the product works, written out so the
@@ -25,13 +25,13 @@ graph stays on the device.
 
 | File | Role |
 |---|---|
-| `DogWalk/Location/WalkLocationManager.swift` | The Core Location configuration that makes the strategy work. **Read this first.** |
-| `DogWalk/Remote/WalkSocketClient.swift` | `URLSessionWebSocketTask`, 1 s → 30 s backoff, 4401 → refresh, 20 s keepalive ping. |
-| `DogWalk/Remote/Protocol.swift` | The wire frames, field names unchanged from Android. |
-| `DogWalk/Session/WalkSession.swift` | Orchestration: fixes out, proximity frames in, session renewal. |
-| `DogWalk/Notifications/ProximityNotifier.swift` | One sound per relationship, chosen per notification. |
-| `DogWalk/Model/Models.swift` | `WalkerLocation`, `NearbyWalker`, `DogRelationship`, `MarkedDog`. |
-| `DogWalk/Resources/Info.plist` | The two keys that matter, with the reasoning inline. |
+| `Mikywalk/Location/WalkLocationManager.swift` | The Core Location configuration that makes the strategy work. **Read this first.** |
+| `Mikywalk/Remote/WalkSocketClient.swift` | `URLSessionWebSocketTask`, 1 s → 30 s backoff, 4401 → refresh, 20 s keepalive ping. |
+| `Mikywalk/Remote/Protocol.swift` | The wire frames, field names unchanged from Android. |
+| `Mikywalk/Session/WalkSession.swift` | Orchestration: fixes out, proximity frames in, session renewal. |
+| `Mikywalk/Notifications/ProximityNotifier.swift` | One sound per relationship, chosen per notification. |
+| `Mikywalk/Model/Models.swift` | `WalkerLocation`, `NearbyWalker`, `DogRelationship`, `MarkedDog`. |
+| `Mikywalk/Resources/Info.plist` | The two keys that matter, with the reasoning inline. |
 
 ## What is not here
 
@@ -43,16 +43,16 @@ on the background decision, and they are Phases 1, 3 and 5 in `../IOS-PORT.md`.
 ## Building it on a Mac
 
 1. Xcode 15 or later, iOS 17 deployment target (`@Observable` needs it).
-2. New iOS App target, SwiftUI, bundle id `com.dogwalk`.
-3. Drag `DogWalk/` into the project. Replace the generated `Info.plist` with
-   `DogWalk/Resources/Info.plist`, or copy its keys into the generated one.
+2. New iOS App target, SwiftUI, bundle id `com.mikywalk`.
+3. Drag `Mikywalk/` into the project. Replace the generated `Info.plist` with
+   `Mikywalk/Resources/Info.plist`, or copy its keys into the generated one.
 4. Signing & Capabilities → Background Modes → tick **Location updates**. This
    writes the same `UIBackgroundModes` entry the plist already has; having both
    is harmless, having neither is a crash.
 5. Copy the two tones into the app bundle, unchanged:
    ```
-   cp ../android/app/src/main/res/raw/friend_chime.wav   DogWalk/Resources/
-   cp ../android/app/src/main/res/raw/disliked_alarm.wav DogWalk/Resources/
+   cp ../android/app/src/main/res/raw/friend_chime.wav   Mikywalk/Resources/
+   cp ../android/app/src/main/res/raw/disliked_alarm.wav Mikywalk/Resources/
    ```
    They must be in the bundle root or a folder reference, not a group, or
    `UNNotificationSound(named:)` will not find them.

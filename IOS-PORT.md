@@ -1,4 +1,4 @@
-# Porting DogWalk to iPhone
+# Porting Mikywalk to iPhone
 
 A plan for a native iOS client against the existing backend. Written after reading
 the whole Android app and the whole backend, so the numbers and file names here are
@@ -186,7 +186,7 @@ notifications, etc."
 
 ### 1. Notification channels do not exist on iOS
 
-Android has four channels (`dogwalk_tracking`, `dogwalk_proximity`,
+Android has four channels (`mikywalk_tracking`, `mikywalk_proximity`,
 `_friend`, `_disliked`) because a channel's sound is fixed at creation. iOS has no
 channels at all: you set the sound per notification with
 `UNNotificationSound(named: UNNotificationSoundName("friend_chime.wav"))`.
@@ -201,7 +201,7 @@ buttons, not for sound settings.
 
 ### 2. The foreground-service notification has no equivalent
 
-Android shows a persistent "DogWalk is tracking your walk" notification with a
+Android shows a persistent "Mikywalk is tracking your walk" notification with a
 Stop action. On iOS the blue location indicator in the status bar is system-owned
 and not customisable. The closest analogue is a **Live Activity** (iOS 16.1+),
 which would show the walk state on the Lock Screen and Dynamic Island. That is a
@@ -219,7 +219,7 @@ not Phase 1.
 | `ui/map/MapLibreMap.kt` | 401 | `MapView.swift` | `UIViewRepresentable` wrapping `MLNMapView`. |
 | `ui/map/MapScreen.kt` | 637 | `MapScreen.swift` | The bulk of the UI work. |
 | `ui/map/MapViewModel.kt` | 173 | *(folded into `WalkSession`)* | SwiftUI needs less view-model ceremony. |
-| `DogWalkApp.kt` + `MainActivity.kt` | 51 | `DogWalkApp.swift` | |
+| `MikywalkApp.kt` + `MainActivity.kt` | 51 | `MikywalkApp.swift` | |
 
 ### Map specifics
 
@@ -256,7 +256,7 @@ edit to `style.json` plus a key, and it is the same edit for both platforms.
 
 ```xml
 <key>NSLocationWhenInUseUsageDescription</key>
-<string>DogWalk shows you other walkers within 500 m and alerts you when a dog you have marked comes near.</string>
+<string>Mikywalk shows you other walkers within 500 m and alerts you when a dog you have marked comes near.</string>
 <key>UIBackgroundModes</key>
 <array><string>location</string></array>
 ```
@@ -332,8 +332,8 @@ Phase 1 rather than inheriting the gap: `GeoMath`, the frame decoding, and the
 
 1. **Background alerts — decided: option A.** Background location mode with the
    socket held open, When In Use authorization only. Implemented in
-   `ios/DogWalk/Location/WalkLocationManager.swift` and
-   `ios/DogWalk/Remote/WalkSocketClient.swift`. APNs stays on the shelf as a
+   `ios/Mikywalk/Location/WalkLocationManager.swift` and
+   `ios/Mikywalk/Remote/WalkSocketClient.swift`. APNs stays on the shelf as a
    possible later addition for the terminated case, but not as the primary
    transport, because Apple throttles background pushes to a few per hour.
 2. **MapLibre iOS or MapKit?** MapLibre keeps visual parity with Android and

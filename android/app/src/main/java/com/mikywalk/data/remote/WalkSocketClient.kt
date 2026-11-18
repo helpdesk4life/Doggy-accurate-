@@ -1,0 +1,225 @@
+package com.mikywalk.data.remote
+
+import android.util.Log
+import com.mikywalk.data.auth.AuthStore
+import com.mikywalk.di.ApplicationScope
+import com.mikywalk.model.ConnectionState
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Job
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableSharedFlow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharedFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asSharedFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
+import kotlinx.serialization.encodeToString
+import kotlinx.serialization.json.Json
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.Response
+import okhttp3.WebSocket
+import okhttp3.WebSocketListener
+import java.net.URLEncoder
+import java.util.concurrent.TimeUnit
+import javax.inject.Inject
+import javax.inject.Singleton
+import kotlin.math.min
+
+/**
+ * OkHttp WebSocket transport for the walk session.
+ *
+ * Owns reconnection with exponential backoff (1s -> 30s cap) so callers only have to
+ * observe [state] and [frames]. All mutable fields are guarded by [lock] because
+ * OkHttp delivers callbacks on its own reader thread.
+ *
+ * The access token travels in the `Authorization` header rather than the query
+ * string, so it never appears in the server's access log. When the server closes
+ * with [UNAUTHORIZED] the socket does not retry on its own: it emits
+ * [authExpired] and waits for the repository to refresh the token and call
+ * [reconnect]. Retrying with the same dead token would just loop.
+ */
+@Singleton
+class WalkSocketClient @Inject constructor(
+    private val json: Json,
+    private val authStore: AuthStore,
+    @param:ApplicationScope private val scope: CoroutineScope,
+) : WalkTransport {
+    private val httpClient = OkHttpClient.Builder()
+        .pingInterval(20, TimeUnit.SECONDS)
+        .retryOnConnectionFailure(true)
+        .build()
+
+    private val lock = Any()
+
+    private val _state = MutableStateFlow(ConnectionState.DISCONNECTED)
+    override val state: StateFlow<ConnectionState> = _state.asStateFlow()
+
+    private val _frames = MutableSharedFlow<ServerFrame>(extraBufferCapacity = 128)
+    override val frames: SharedFlow<ServerFrame> = _frames.asSharedFlow()
+
+    private val _authExpired = MutableSharedFlow<Unit>(extraBufferCapacity = 1)
+    override val authExpired: SharedFlow<Unit> = _authExpired.asSharedFlow()
+
+    private var webSocket: WebSocket? = null
+    private var endpoint: String? = null
+    private var displayName: String = ""
+    private var reconnectAttempt = 0
+    private var reconnectJob: Job? = null
+    private var stopped = true
+
+    override fun connect(endpoint: String, displayName: String) {
+        synchronized(lock) {
+            this.endpoint = endpoint
+            this.displayName = displayName
+            stopped = false
+            reconnectAttempt = 0
+            reconnectJob?.cancel()
+            reconnectJob = null
+            openLocked()
+        }
+    }
+
+    override fun disconnect() {
+        synchronized(lock) {
+            stopped = true
+            reconnectJob?.cancel()
+            reconnectJob = null
+            webSocket?.close(NORMAL_CLOSURE, "walk finished")
+            webSocket = null
+            _state.value = ConnectionState.DISCONNECTED
+        }
+    }
+
+    /** Re-open after the caller has refreshed the access token. */
+    override fun reconnect() {
+        synchronized(lock) {
+            if (stopped) return
+            reconnectAttempt = 0
+            // A retry may already be waiting out its backoff. Left alone it
+            // fires after this call and calls openLocked() again, cancelling
+            // the socket opened here and dialling a third time.
+            reconnectJob?.cancel()
+            reconnectJob = null
+            openLocked()
+        }
+    }
+
+    /** Returns false when the socket is not open, so the caller can drop the fix. */
+    override fun sendLocation(
+        latitude: Double,
+        longitude: Double,
+        accuracyMeters: Float,
+        timestampMillis: Long,
+    ): Boolean {
+        val socket = synchronized(lock) { webSocket } ?: return false
+        val frame = LocationFrame(
+            lat = latitude,
+            lon = longitude,
+            accuracy = accuracyMeters,
+            ts = timestampMillis,
+        )
+        return socket.send(json.encodeToString(frame))
+    }
+
+    private fun openLocked() {
+        val base = endpoint ?: return
+        val token = authStore.accessToken()
+        if (token == null) {
+            _state.value = ConnectionState.DISCONNECTED
+            _authExpired.tryEmit(Unit)
+            return
+        }
+
+        webSocket?.cancel()
+        _state.value = ConnectionState.CONNECTING
+        val request = Request.Builder()
+            .url(buildUrl(base))
+            .header("Authorization", "Bearer $token")
+            .build()
+        webSocket = httpClient.newWebSocket(request, listener)
+    }
+
+    private fun buildUrl(base: String): String {
+        val separator = if (base.contains('?')) '&' else '?'
+        val name = URLEncoder.encode(displayName, "UTF-8")
+        return "$base${separator}name=$name"
+    }
+
+    private fun scheduleReconnect() {
+        synchronized(lock) {
+            if (stopped) return
+            if (reconnectJob?.isActive == true) return
+            val backoffMs = backoffMillis(reconnectAttempt)
+            reconnectAttempt++
+            reconnectJob = scope.launch {
+                delay(backoffMs)
+                synchronized(lock) {
+                    if (!stopped) openLocked()
+                }
+            }
+        }
+    }
+
+    private val listener = object : WebSocketListener() {
+
+        override fun onOpen(webSocket: WebSocket, response: Response) {
+            Log.i(TAG, "socket open")
+            synchronized(lock) { reconnectAttempt = 0 }
+            _state.value = ConnectionState.CONNECTED
+        }
+
+        override fun onMessage(webSocket: WebSocket, text: String) {
+            val frame = runCatching { json.decodeFromString<ServerFrame>(text) }.getOrNull() ?: return
+            _frames.tryEmit(frame)
+        }
+
+        override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
+            // Without this the reason a connection failed is invisible: the UI only
+            // shows "Offline", which looks identical for a TLS error, a refused
+            // connection and a rejected token.
+            Log.w(TAG, "socket failure (http=${response?.code})", t)
+            _state.value = ConnectionState.DISCONNECTED
+            scheduleReconnect()
+        }
+
+        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+            // OkHttp only calls onClosed once *both* peers have sent a close frame.
+            // When the server closes first, acknowledging here is what completes the
+            // handshake and lets onClosed run. Without it a server-initiated close is
+            // completely silent: no onClosed, no onFailure, so the client never
+            // refreshes its token and never reconnects, while the UI keeps showing
+            // the last state it saw.
+            webSocket.close(NORMAL_CLOSURE, null)
+        }
+
+        override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
+            Log.i(TAG, "socket closed code=$code reason=$reason")
+            _state.value = ConnectionState.DISCONNECTED
+            if (code == UNAUTHORIZED) {
+                _authExpired.tryEmit(Unit)
+            } else {
+                scheduleReconnect()
+            }
+        }
+    }
+
+    companion object {
+        private const val TAG = "WalkSocket"
+        private const val NORMAL_CLOSURE = 1000
+        private const val UNAUTHORIZED = 4401
+        private const val BASE_BACKOFF_MS = 1_000L
+        private const val MAX_BACKOFF_MS = 30_000L
+
+        /**
+         * The reconnect ladder: 1 s, 2 s, 4 s, 8 s, 16 s, then 30 s forever.
+         *
+         * Exposed so the ladder can be asserted directly. Driving it through the
+         * socket would mean waiting real seconds for each rung, and the arithmetic
+         * is the part that can be wrong.
+         */
+        internal fun backoffMillis(attempt: Int): Long =
+            min(MAX_BACKOFF_MS, BASE_BACKOFF_MS shl min(attempt, 5))
+    }
+}
