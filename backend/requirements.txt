@@ -2,6 +2,6 @@ fastapi>=0.115
 uvicorn[standard]>=0.54.0
 redis>=5.2
 pydantic>=2.14.3
-pyjwt>=2.9
+pyjwt>=2.15.1
 jinja2>=3.1.6
 python-multipart>=0.0.9
