@@ -119,6 +119,61 @@ A Redis backup was taken first, at `/home/thomas/redis-2026-11-18-predeploy.tgz`
 (1.6 KB `dump.rdb` plus a 49 KB AOF). Admin sessions issued before PR #19 are
 invalidated by this deploy — sign in to the panel again.
 
+## Session log — 2026-11-18 — monitoring, and the half a script cannot do
+
+The last open gap from the "what else should I do" list. `deploy/watchdog.py`
+runs every five minutes from `/etc/cron.d/mikywalk-watchdog` as `thomas` and
+emails when a check changes state.
+
+### What it checks, and why those nine
+
+`health` (the public `/health` over HTTPS — one request that crosses DNS, TLS,
+Caddy, the proxy and the app), `maps` (the range request, because a 200 there
+means the map will not load), `caddy` (the *systemd* one: the compose `caddy`
+only publishes 8443 and is not what serves users), `containers` (backend, redis,
+redis-geo — running and healthy), `redis` (`PING` **and** a non-empty keyspace),
+`disk`, `memory`, `certificate` (days to expiry), `backup` (age of the newest
+snapshot, which is what makes yesterday's silent failure visible).
+
+The Redis keyspace check is the one worth arguing for. A Redis that restarted
+empty answers `PING`, reports healthy, and passes every other check on this list
+while every account, invite and block is gone. `DBSIZE` is the only thing that
+notices.
+
+### Why email, and why only on change
+
+The SMTP credentials were already on the box and already proven, so alerting
+costs no new dependency and no new public surface. A dashboard is a fine thing
+to add later; it is not what wakes you up.
+
+Each check keeps its last state in `/home/thomas/monitoring/state.json`. A
+transition sends one message, a recovery sends one, and a failure that persists
+re-sends every six hours (`REALERT_HOURS`) so it cannot be quietly forgotten. A
+check that has been failing for a week sends 28 messages, not 2016.
+
+### The half a script on this box cannot do
+
+If the machine dies, the watchdog dies with it, and the silence is
+indistinguishable from health. `HEARTBEAT_URL` closes that hole: every run pings
+an external service and the *absence* of the ping is the alert. It is unset
+right now, so **a dead box is still invisible** — that is the one manual step
+left, and the script says so in every log line until it is done.
+
+### Verified
+
+All nine checks pass on the box. The state machine was driven for real: a forced
+disk failure sent one alert, an immediate re-run sent nothing, and returning to
+normal sent one recovery. A stopped container reports `redis-geo is exited` and a
+starting one `redis-geo is running but starting`.
+
+Two things the testing changed. `docker compose ps` without `-a` omits stopped
+containers, so a dead service reported as *missing* — which sends you looking for
+a deleted service instead of a crashed one; it now passes `-a`. And the first
+local dry run failed `health`, `maps` and `certificate` with "certificate has
+expired" while the same checks passed on the box: the Windows Python CA store
+does not have the current Let's Encrypt chain (`YE2` / `Root YE`). The certificate
+is valid to 2027-02-12. Worth knowing before trusting a laptop's verdict on TLS.
+
 ## Session log — 2026-11-18 — backups, and the `.env` files one `git add` away
 
 Two gaps from the "what else should I do" list, both closed. Neither touches the
@@ -281,7 +336,8 @@ route**; the email-verification decision; ~~a reconnect backoff pass~~ — close
 2026-11-17, see **Session log — 2026-11-17 — the reconnect backoff pass**;
 accessibility; `/me`; blocks-cap atomicity; ~~backups~~ — closed 2026-11-18, see
 **Session log — 2026-11-18 — backups, and the `.env` files one `git add` away**;
-monitoring on the box.
+~~monitoring on the box~~ — closed 2026-11-18, see **Session log — 2026-11-18
+— monitoring, and the half a script cannot do**.
 
 ## Session log — 2026-11-17 — the reconnect backoff pass
 

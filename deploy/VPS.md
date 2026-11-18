@@ -542,6 +542,59 @@ Verified live: 40 requests to nonexistent paths from the box itself produced an
 then failed until the decision was deleted; SSH brute-force from two real IPs was
 banned from auth.log; `deploy/verify.sh` still passes every check.
 
+## 14. Monitoring (installed 2026-11-18)
+
+`deploy/watchdog.py` runs every five minutes from `/etc/cron.d/mikywalk-watchdog`
+as `thomas` and emails when a check changes state. Nine checks: the public
+`/health` over HTTPS, the maps range request, the systemd Caddy, the three
+containers, Redis `PING` plus a non-empty keyspace, disk, memory, certificate
+expiry, and backup freshness.
+
+```bash
+# what it thinks right now, without changing anything
+sudo -u thomas python3 ~/dog/deploy/watchdog.py --dry-run
+
+# prove the mail path
+sudo -u thomas python3 ~/dog/deploy/watchdog.py --test-email
+
+# what it has been doing
+tail -20 /home/thomas/monitoring/watchdog.log
+```
+
+Settings live in `/etc/default/mikywalk-watchdog` (mode 644, no secrets in it —
+the SMTP password is read from `backend/.env`). The script reads that file
+itself, so a manual run and a cron run behave the same. The knobs worth knowing:
+`ALERT_TO` (defaults to `SMTP_FROM`), `REALERT_HOURS` (default 6 — how often a
+failure that is still failing re-sends), `DISK_MAX_PCT` (85), `CERT_MIN_DAYS`
+(14), `BACKUP_MAX_HOURS` (36), and `REDIS_MIN_KEYS` (1 — set it to 0 on a fresh
+box that legitimately has no accounts yet).
+
+**It only mails on change.** A check that has been failing for a week sends one
+message every six hours, not 2016 of them. A recovery sends one message.
+
+### The half that a script on this box cannot do
+
+If the machine dies, the watchdog dies with it, and the silence is
+indistinguishable from health. `HEARTBEAT_URL` closes that hole: every run pings
+an external service, and the *absence* of the ping is the alert. healthchecks.io's
+free tier is enough — create a check with a five-minute period and a one-hour
+grace, then:
+
+```bash
+echo 'HEARTBEAT_URL=https://hc-ping.com/00000000-0000-0000-0000-000000000000' \
+  >> /etc/default/mikywalk-watchdog
+```
+
+A failing run pings `<url>/fail` instead, so the external service shows the same
+state. With `HEARTBEAT_URL` unset the watchdog still works, but it can only tell
+you about a dead container, never a dead machine — and it says so in every log
+line.
+
+**What is still not covered:** nothing watches the watchdog's own email delivery
+(if Gmail starts rejecting, alerts stop silently — the heartbeat is the answer
+to that too), there is no history or graph, and nothing alerts on a slow
+response, only on a wrong one.
+
 ## What this does not do
 
 - ~~**No SMTP credentials yet.**~~ Closed on 2026-11-16: Gmail over port 465 SSL
@@ -561,4 +614,6 @@ banned from auth.log; `deploy/verify.sh` still passes every check.
 - ~~**No backups.**~~ Closed on 2026-11-18: `deploy/backup-redis.sh` runs daily
   from `/etc/cron.d/mikywalk-backup`, keeps 14 days, and logs to
   `/home/thomas/backups/backup.log`. Restore is still manual — see step 12.
-- **No monitoring.** If the container dies, nothing tells you.
+- ~~**No monitoring.**~~ Closed on 2026-11-18: `deploy/watchdog.py` emails on
+  state change from cron, and `HEARTBEAT_URL` covers a dead machine. See
+  step 14. Still missing: history, graphs, and latency alerting.
