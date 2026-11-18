@@ -148,6 +148,22 @@ Tested locally against the running stack: success path (10074 B, valid header),
 retention prune (a 30-day-old file deleted), and the missing-container path
 (exit 1, no partial file left behind).
 
+Two things the box taught it that the local run could not. The script was
+committed 644 — `core.fileMode` is false on the Windows checkout, so the local
+`chmod +x` never reached the repository, and cron cannot execute a 644 file; it
+is now `100755` in the index via `git update-index --chmod=+x`. And `find`
+chdirs back to its starting directory before exiting, so under `sudo -u thomas`
+from a root shell (cwd `/root`) the prune step exited 1 and reported a failed
+backup that had in fact written a valid snapshot. The script now cds into the
+backup directory first.
+
+Proven on the box, not just locally: a temporary every-minute cron entry ran the
+real script twice as `thomas`, both exit 0, both lines in `backup.log`; the probe
+was then removed and only the 03:17 entry remains. And the snapshot was restored
+into a throwaway `redis:7-alpine` container — 10 keys, the admin account, the
+walker account, `dogwalk:settings:smtp` and `dogwalk:invites:used` as a ZSET with
+all 7 members. A backup nobody has restored is a guess; this one has been.
+
 ### `.env.*` was committable
 
 `.gitignore` had a bare `.env`, which matches that exact name and nothing else.
