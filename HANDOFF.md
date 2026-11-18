@@ -5,11 +5,13 @@ first when picking the project back up. For what to build next, see
 `ROADMAP.md`; for the iOS plan in full, `IOS-PORT.md`; for the iOS code that
 exists, `ios/README.md`.
 
-**`main` is clean.** `main` is the PR #13 squash merge `0906161` plus docs
-follow-ups, then the three Android PRs described just below. The VPS was not
-redeployed for any of them — the backend image is unchanged throughout. See
-**Session log — 2026-11-17 — the five leaked secrets** below for what landed in
-the last session. The admin panel
+**`main` is clean at `e73d355`.** Since the security-review session: PR #13
+(`0906161`, dependency scanners), the three Android PRs, the hardening pass
+(PRs #17-#19), the docs follow-up (#20), the backend efficiency pass (#21) and
+the DogWalk -> Mikywalk rebrand (#22). The backend image changed with #17-#19,
+#21 and #22, so the VPS needs `docker compose up -d redis redis-geo backend`.
+See **Session log — 2026-11-18** at the top of the log for the last session.
+The admin panel
 landed earlier as `e5ed2ad admin pagina en account creation`, on top of
 `7d26413 Eerste versie`; see **What landed in `e5ed2ad`** at the bottom for
 what that commit contains.
@@ -33,6 +35,78 @@ capped used-invite set, server-side admin logout revocation, and the GEOSEARCH /
 sweeper performance fixes. See **Session log — 2026-11-17 — security hardening
 pass** at the top of the log. The backend image changes, so redeploy the VPS with
 `docker compose up -d redis redis-geo backend`.
+
+## Session log — 2026-11-18 — resume: the rebrand, and two bugs CI could not see
+
+Picked the project back up, pulled `main` from `github` (20 commits), rebuilt the
+local stack, and ran the gate. Two things were broken that the CI runs on those
+PRs were structurally unable to catch.
+
+### What was already on `main` when this session started
+
+- **PR #20** (`56a4d08`) — docs for the hardening pass.
+- **PR #21** (`d4abdc0`) — backend efficiency: scrypt moved off the event loop
+  behind a `semaphore(8)`, pipelined geo reads, and a sweeper that costs
+  O(expired) instead of O(connected).
+- **PR #22** (`4a8e6dc`) — the rebrand: DogWalk -> Mikywalk across backend,
+  Android, iOS and docs. `com.dogwalk` -> `com.mikywalk`, so **devices must
+  un/reinstall the app**. The Redis prefix stays `dogwalk:` on purpose —
+  renaming it would orphan every account, invite and block on the VPS — and
+  `MIKYWALK_ENV` falls back to `DOGWALK_ENV` so an existing `.env` still boots.
+
+### Bug 1 — registration answered 500 on any database older than PR #17
+
+`dogwalk:invites:used` changed from a set to a sorted set in the hardening pass,
+so the cap could evict with `ZREMRANGEBYRANK`. Redis refuses `ZADD` on a set with
+`WRONGTYPE` rather than converting, and `invites.consume()` writes that key on
+every registration. So on the local volume (62 used codes) and on the VPS (46)
+`POST /auth/register` returned 500. `scripts/e2e.py` died on its first
+registration with a JSON decode error, which is how it surfaced.
+
+CI could not catch it: it starts against an empty Redis, where the first write
+creates the key with the new type. The failure exists only where the old key
+already exists, which is every deployment that has been running.
+
+Fixed with `app/migrations.py`, called from the lifespan before the sweeper: it
+reads the type and converts in place, so the documented deploy command needs no
+extra step. `dogwalk:walkers:seen` (hash -> sorted set, PR #18) is repaired the
+same way, keeping its scores because the sweeper reads them as last-seen times.
+Verified live: the local key went `set` -> `zset` with all 62 members kept, and
+`scripts/e2e.py` returned to 56/56.
+
+### Bug 2 — the suite hung instead of failing
+
+`test_proximity.py::test_disconnect_clears_the_watcher` hung on 8 of 10 runs.
+Not a product bug: starlette's `WebSocketTestSession.__exit__` sends the
+disconnect and then cancels the server task, so the cleanup that sends
+`PROXIMITY_CLEAR` was killed mid-flight. Whether it finished first was the coin
+flip. The test now calls `bob.close()` inside the context — which sends the
+disconnect without cancelling — and asserts there. 10/10 after the change.
+
+Worth knowing: a missing frame shows up as a hang, not a failure, so this cost
+far more to find than it should have. Any future test that waits on a frame the
+server may never send has the same shape.
+
+### Verification
+
+`python -m pytest -q` in `backend/`: **287 passed**, five consecutive runs, ~45 s
+each (280 before this session's seven migration tests). `ruff check --select
+F,E9 app/ tests/ scripts/` clean. `scripts/e2e.py` 56/56 against the local stack.
+`docker compose up -d --build` brings up `redis`, `redis-geo`, `backend` and
+`caddy`; `/health` answers on both `:8000` and `:8443`.
+
+Android: `:app:testDebugUnitTest` 68 tests, 0 failures, and `:app:lintDebug`
+clean — but only after `./gradlew clean`. The first build failed with
+`Could not find class file for 'com.dogwalk.DogWalkApp'`: Hilt's generated
+sources under `app/build/` still named the pre-rebrand class, and no source file
+does. A clean build is the fix, and it is a one-off — nothing to change in the
+repo.
+
+### Deployment note
+
+The migration runs at boot, so the existing command is still the whole story:
+`docker compose up -d redis redis-geo backend`. The first boot after it logs
+`converted legacy key types: dogwalk:invites:used` once. Nothing else changes.
 
 ## Session log — 2026-11-17 — security hardening pass (PRs #17, #18, #19)
 

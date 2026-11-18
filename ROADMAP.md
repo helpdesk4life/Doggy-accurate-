@@ -3,7 +3,7 @@
 What to build next, in priority order. `HANDOFF.md` covers how to get the stack
 running and what is already verified; this file is the forward-looking half.
 
-Last updated 2026-11-16 (see **Session log — 2026-11-16** in `HANDOFF.md`).
+Last updated 2026-11-18 (see **Session log — 2026-11-18** in `HANDOFF.md`).
 
 ## Start here tomorrow
 
@@ -23,19 +23,23 @@ export JAVA_HOME="/c/Program Files/Android/Android Studio/jbr"
 
 # 4. Confirm nothing regressed
 cd /c/Users/thoma/Downloads/dog/backend
-./.venv/Scripts/python.exe -m pytest -q          # expect 235 passed
+./.venv/Scripts/python.exe -m pytest -q          # expect 287 passed
 ./.venv/Scripts/python.exe scripts/e2e.py        # expect 56/56
 ```
 
-**The tree is clean**, HEAD `99b95bc` — PR #13 (`0906161`, dependency scanners:
-pip-audit + OSV-Scanner, docs on top), then the three Android PRs merged in
-order on 2026-11-16: #14 (`7a2803f`, alert refresh), #16 (`f6ca3d8`, urgency
-ranks who is present), #15 (`1ea8141`, GPS sleeps while stationary). The same
-day the VPS went live on SMTP, the three leaked-or-stale secrets were rotated
-(JWT, admin password, Caddy gate) and the panel login was recorded in the
-secrets file — see **Session log — 2026-11-16** in `HANDOFF.md`, **What landed
-in `e5ed2ad`** for the panel, and **Blocking** for the block store. Earlier
-layers: the pip floor bumps (#2–#6) and walk history (`c9313d1`).
+**The tree is clean**, HEAD `e73d355` — the hardening pass (PRs #17–#19), its
+docs (#20), the backend efficiency pass (#21) and the DogWalk -> Mikywalk
+rebrand (#22). Before those: PR #13 (`0906161`, dependency scanners: pip-audit +
+OSV-Scanner, docs on top), then the three Android PRs merged in order on
+2026-11-16: #14 (`7a2803f`, alert refresh), #16 (`f6ca3d8`, urgency ranks who is
+present), #15 (`1ea8141`, GPS sleeps while stationary). See **Session log —
+2026-11-18** in `HANDOFF.md` for the two bugs found on resume, **What landed in
+`e5ed2ad`** for the panel, and **Blocking** for the block store. Earlier layers:
+the pip floor bumps (#2–#6) and walk history (`c9313d1`).
+
+**The rebrand changed the Android applicationId** (`com.dogwalk` ->
+`com.mikywalk`), so the emulator needs `./gradlew :app:installDebug` again and
+the old package should be uninstalled; permissions are re-granted on install.
 
 The app is signed in as `fresh@example.com` / `hunter2hunter2` with dog `Pickle`.
 `emma@example.com` also uses `hunter2hunter2`. `buddy@example.com` was created by
@@ -440,8 +444,8 @@ that had drifted from the code: production TLS was recorded as still on the loca
 CA, blocking was recorded as not existing, the admin panel was recorded as having
 no second gate, and four test counts were stale. The second pass followed the
 security review and added the blocks API to `README.md`, which had never
-documented it, plus the two email test files. Current gate: 235 backend tests,
-56/56 e2e, 66 Android tests, 0 lint errors, 16/16 on the VPS.
+documented it, plus the two email test files. Current gate: 287 backend tests,
+56/56 e2e, 68 Android tests, 0 lint errors, 16/16 on the VPS.
 
 **Walk history and stats landed** (P3): distance, duration and dogs met, all
 derived client-side from what the app already receives — the first feature that
