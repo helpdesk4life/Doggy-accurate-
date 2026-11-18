@@ -60,10 +60,9 @@ async def _refresh(request: Request, walker_ids: set[str]) -> None:
 
     ``refresh_neighborhood`` rather than ``update_walker``: the latter also
     refreshes every neighbour of each walker, which here means each of the two
-    sockets gets the same frame twice. ``last_neighbors`` is left stale on
-    purpose — the next fix recomputes it, and a stale entry only costs one
-    redundant refresh. It can never leak, because every refresh filters against
-    the hidden set of the walker it is sent to.
+    sockets gets the same frame twice. ``refresh_neighborhood`` does keep
+    ``last_neighbors`` current; that is what lets the sweeper refresh only the
+    connections an expired walker was visible to.
     """
     hub = getattr(request.app.state, "hub", None)
     if hub is None:

@@ -37,6 +37,12 @@ async def refresh_neighborhood(
     if hidden:
         hits = [hit for hit in hits if hit.walker_id not in hidden]
 
+    # Record what this walker was last shown, so the sweeper can tell which
+    # connections an expired walker was visible to.
+    connection = hub.get(walker_id)
+    if connection is not None:
+        connection.last_neighbors = {hit.walker_id for hit in hits}
+
     if hits:
         alert = ProximityAlert(
             radius_m=radius_m,
@@ -85,13 +91,12 @@ async def update_walker(
     )
     current = {hit.walker_id for hit in hits}
 
-    if connection is not None:
-        connection.last_neighbors = current
-
-    for other_id in (previous | current) - {walker_id}:
-        coords = await geo.position(
-            geo_redis if geo_redis is not None else redis, other_id
-        )
+    # One pipelined read for all neighbors' coordinates instead of one HGET each.
+    others = (previous | current) - {walker_id}
+    geo_redis = geo_redis if geo_redis is not None else redis
+    coords_by_id = await geo.positions(geo_redis, others)
+    for other_id in others:
+        coords = coords_by_id.get(other_id)
         if coords is None:
             continue
         await refresh_neighborhood(
@@ -106,8 +111,9 @@ async def refresh_watchers(
 ) -> None:
     """Re-evaluate the given walkers, e.g. after someone they were watching disappeared."""
     geo_redis = geo_redis if geo_redis is not None else redis
+    coords_by_id = await geo.positions(geo_redis, watcher_ids)
     for other_id in watcher_ids:
-        coords = await geo.position(geo_redis, other_id)
+        coords = coords_by_id.get(other_id)
         if coords is None:
             continue
         await refresh_neighborhood(

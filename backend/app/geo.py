@@ -46,12 +46,47 @@ async def remove(redis, walker_id: str) -> None:
         await pipe.execute()
 
 
+async def remove_many(redis, walker_ids) -> None:
+    """Remove several walkers in one round trip instead of one pipeline each."""
+    walker_ids = list(walker_ids)
+    if not walker_ids:
+        return
+    async with redis.pipeline(transaction=False) as pipe:
+        for walker_id in walker_ids:
+            pipe.zrem(GEO_KEY, walker_id)
+            pipe.hdel(POS_KEY, walker_id)
+            pipe.zrem(SEEN_KEY, walker_id)
+        await pipe.execute()
+
+
 async def position(redis, walker_id: str) -> tuple[float, float] | None:
     raw = await redis.hget(POS_KEY, walker_id)
     if raw is None:
         return None
     lat, lon = raw.split(",")
     return float(lat), float(lon)
+
+
+async def positions(redis, walker_ids) -> dict[str, tuple[float, float]]:
+    """Many positions in one round trip (pipelined HGETs), missing ids skipped.
+
+    The per-fix fan-out and the sweeper need the coordinates of every neighbor
+    at once; fetching them one HGET each turns k neighbors into k round trips.
+    """
+    walker_ids = list(walker_ids)
+    if not walker_ids:
+        return {}
+    async with redis.pipeline(transaction=False) as pipe:
+        for walker_id in walker_ids:
+            pipe.hget(POS_KEY, walker_id)
+        rows = await pipe.execute()
+    out: dict[str, tuple[float, float]] = {}
+    for walker_id, raw in zip(walker_ids, rows):
+        if raw is None:
+            continue
+        lat, lon = raw.split(",")
+        out[walker_id] = (float(lat), float(lon))
+    return out
 
 
 async def nearby(

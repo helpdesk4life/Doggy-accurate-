@@ -99,7 +99,7 @@ async def create_user(
     now = time.time()
     record = {
         "email": email,
-        "password_hash": auth.hash_password(password),
+        "password_hash": await auth.hash_password_async(password),
         "created_at": int(now),
         "token_version": 1,
     }
@@ -194,7 +194,7 @@ async def authenticate(redis, email: str, password: str, client_ip: str = "") ->
     # here would make "no such account" measurably faster than "wrong password",
     # which is an account enumeration oracle.
     stored = user["password_hash"] if user is not None else _DUMMY_PASSWORD_HASH
-    password_ok = auth.verify_password(password, stored)
+    password_ok = await auth.verify_password_async(password, stored)
 
     if user is None or not password_ok:
         count = await redis.hincrby(fail_key, field, 1)
@@ -216,8 +216,9 @@ async def set_password(redis, user_id: str, password: str) -> None:
     never passes the temporary password on.
     """
     key = USER_KEY.format(user_id=user_id)
+    password_hash = await auth.hash_password_async(password)
     async with redis.pipeline(transaction=True) as pipe:
-        pipe.hset(key, "password_hash", auth.hash_password(password))
+        pipe.hset(key, "password_hash", password_hash)
         pipe.hdel(key, "must_change_password")
         await pipe.execute()
 

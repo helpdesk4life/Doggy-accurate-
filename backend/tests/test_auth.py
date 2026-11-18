@@ -1,3 +1,5 @@
+import asyncio
+
 import fakeredis.aioredis
 import pytest
 from fastapi.testclient import TestClient
@@ -8,6 +10,20 @@ from app.main import create_app
 
 PASSWORD = "correct-horse-battery"
 EMAIL = "alice@example.com"
+
+
+def test_async_hash_wrappers_round_trip():
+    """The async wrappers exist so scrypt runs off the event loop; they must
+    produce and verify exactly what the sync functions do."""
+
+    async def scenario():
+        stored = await auth.hash_password_async(PASSWORD)
+        assert await auth.verify_password_async(PASSWORD, stored) is True
+        assert await auth.verify_password_async("wrong-password", stored) is False
+        # The sync verifier still works on hashes made through the wrapper.
+        assert auth.verify_password(PASSWORD, stored) is True
+
+    asyncio.run(scenario())
 
 
 @pytest.fixture
