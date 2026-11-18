@@ -5,12 +5,13 @@ first when picking the project back up. For what to build next, see
 `ROADMAP.md`; for the iOS plan in full, `IOS-PORT.md`; for the iOS code that
 exists, `ios/README.md`.
 
-**`main` is clean at `e73d355`.** Since the security-review session: PR #13
+**`main` is clean at `6e38b89`.** Since the security-review session: PR #13
 (`0906161`, dependency scanners), the three Android PRs, the hardening pass
 (PRs #17-#19), the docs follow-up (#20), the backend efficiency pass (#21) and
 the DogWalk -> Mikywalk rebrand (#22). The backend image changed with #17-#19,
-#21 and #22, so the VPS needs `docker compose up -d redis redis-geo backend`.
-See **Session log — 2026-11-18** at the top of the log for the last session.
+#21 and #22, and **the VPS was deployed to `6e38b89` on 2026-11-18** — see
+**Session log — 2026-11-18** at the top of the log for that and the two bugs
+found on resume.
 The admin panel
 landed earlier as `e5ed2ad admin pagina en account creation`, on top of
 `7d26413 Eerste versie`; see **What landed in `e5ed2ad`** at the bottom for
@@ -104,9 +105,18 @@ repo.
 
 ### Deployment note
 
-The migration runs at boot, so the existing command is still the whole story:
-`docker compose up -d redis redis-geo backend`. The first boot after it logs
-`converted legacy key types: dogwalk:invites:used` once. Nothing else changes.
+Deployed to the VPS on 2026-11-18: the box went from `5df6b4e` (30 commits
+behind, no `redis-geo`) to `6e38b89`. `deploy/verify.sh` passes 16/16 as root,
+`/health` answers over HTTPS, and the admin panel still answers 401 at the Caddy
+gate. The migration ran on the first boot and logged
+`converted legacy key types: dogwalk:invites:used`; the key is now a `zset` with
+all 7 members kept. Registration was proven on the box with a minted invite and
+an already-taken address: **409, not 500**, and the refund put the invite back,
+so the used set is still 7.
+
+A Redis backup was taken first, at `/home/thomas/redis-2026-11-18-predeploy.tgz`
+(1.6 KB `dump.rdb` plus a 49 KB AOF). Admin sessions issued before PR #19 are
+invalidated by this deploy — sign in to the panel again.
 
 ## Session log — 2026-11-17 — security hardening pass (PRs #17, #18, #19)
 
