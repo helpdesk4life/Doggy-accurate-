@@ -41,7 +41,7 @@ from app.routes_admin import EMAIL_PATTERN
 
 router = APIRouter(prefix="/admin/ui", tags=["admin-ui"], include_in_schema=False)
 
-COOKIE = "dogwalk_admin"
+COOKIE = "mikywalk_admin"
 FLASH_KEY = "dogwalk:admin:flash:{flash_id}"
 FLASH_TTL_SECONDS = 120
 PAGE_SIZE = 25
@@ -722,7 +722,7 @@ async def _smtp_test(request: Request, operator: dict, candidate, test_to: str):
     try:
         await sender.send(
             to=recipient,
-            subject="DogWalk SMTP test",
+            subject="Mikywalk SMTP test",
             body=email.test_email_body(candidate.host),
         )
     except Exception as error:

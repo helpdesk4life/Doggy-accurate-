@@ -1,4 +1,4 @@
-# Handoff — DogWalk
+# Handoff — Mikywalk
 
 State captured at the end of the security-review session (2026-11-14). Read this
 first when picking the project back up. For what to build next, see
@@ -112,7 +112,7 @@ this entry, in this order.
    (`ae48aa6`) leaked into this session's transcript and were rotated the same
    day; `CADDY_BASIC_AUTH_PASSWORD` (`02d7e20`) never matched the deployment
    and was rotated too. All three verified live on the box, and the local
-   `.secrets/dogwalk-secrets.env` now matches the deployment everywhere —
+   `.secrets/mikywalk-secrets.env` now matches the deployment everywhere —
    the panel login is recorded there as well (`ADMIN_PANEL_EMAIL`,
    `CADDY_BASIC_AUTH_USER`, `99b95bc`).
 5. **The panel is reachable again** — the admin gate turned out to be the
@@ -360,13 +360,13 @@ the entry look orphaned:
 
 The Linux account is uid 1001, groups `sudo` and `docker`, on host `vmi1524334`
 (`207.180.240.29`). It is **not** the GitHub deploy key
-(`~/.ssh/github_dogwalk` on the box) and not any app account.
+(`~/.ssh/github_mikywalk` on the box) and not any app account.
 
 **Rotated** with `passwd` over SSH — current password, then the new one twice —
 using a 32-character urlsafe value generated locally and piped, never printed.
 Verified three ways: a fresh SSH login as `thomas`, `sudo -S -k id -un`
 returning `root`, and the old password rejected (`Access denied`). The new value
-sits in `.secrets/dogwalk-secrets.env` under a comment block naming the host, the
+sits in `.secrets/mikywalk-secrets.env` under a comment block naming the host, the
 username, and the three identities it is *not*.
 
 **Found while doing it: `~/.ssh/authorized_keys` on the box is empty** (0 bytes,
@@ -414,7 +414,7 @@ owned by `thomas`.
 - **Test before save**: one message through the app's own `SmtpEmailSender` and
   `test_email_body`, executed inside the backend container before anything was
   written — Gmail accepted it, and it landed in the mailbox (subject
-  "DogWalk SMTP test").
+  "Mikywalk SMTP test").
 - **End to end after the switch**: `POST /auth/password-reset/request` for the one
   account on the box → 202. A reset code was generated (Redis index exists), and
   the logs show zero `email to ` lines (the logging sender's signature, which
@@ -425,7 +425,7 @@ owned by `thomas`.
 ### Discovered: the secrets file is stale
 
 - Every entry in the file is now reconciled. The `SMTP_*` set, including the
-  Gmail app password, is recorded in `.secrets/dogwalk-secrets.env` (see above).
+  Gmail app password, is recorded in `.secrets/mikywalk-secrets.env` (see above).
   `JWT_SECRET` and `ADMIN_PANEL_PASSWORD` were rotated the same day they leaked
   (next section), and `CADDY_BASIC_AUTH_PASSWORD` — the one entry that never
   matched the deployment — was rotated and re-recorded the same day.
@@ -441,7 +441,7 @@ owned by `thomas`.
   or wrong credentials → 401 from Caddy itself
   (`WWW-Authenticate: Basic realm="restricted"`); the new password → Caddy
   passes and FastAPI answers its own 303 to the login route. The local
-  `.secrets/dogwalk-secrets.env` records the new value — sync proven by matching
+  `.secrets/mikywalk-secrets.env` records the new value — sync proven by matching
   SHA-256 fingerprints, never by printing — `.secrets/bcrypt.txt` follows the
   new hash, and the repo's `deploy/Caddyfile` hash line was updated to match the
   deployment and committed.
@@ -459,7 +459,7 @@ machine only.
 **`JWT_SECRET` was rotated the same day.** A fresh 48-byte urlsafe secret was
 generated on the box, installed into the `.env`, and baked in with a container
 recreate — health 200, no boot failure. The local
-`.secrets/dogwalk-secrets.env` was updated from the box through a capture that
+`.secrets/mikywalk-secrets.env` was updated from the box through a capture that
 never printed the value, and sync was proven by matching SHA-256 fingerprints
 (`10d65302dc6eefc5`) rather than by printing either side. Every session that
 existed before the rotation — the admin panel included — is now signed with a
@@ -476,14 +476,14 @@ record was replaced, every admin token ever issued — including anything minted
 during the leak window — is dead: `resolve_admin_token` looks the old id up and
 finds nothing. The stale login-failure counter went with the deleted keys. The new
 password (24-char urlsafe, generated locally, piped over SSH, never printed) is
-recorded in `.secrets/dogwalk-secrets.env`, and was verified two ways: scrypt
+recorded in `.secrets/mikywalk-secrets.env`, and was verified two ways: scrypt
 against the Redis hash (`True`), and a real `POST /admin/auth/login` on the
 loopback returning 200 with the token written to a deleted temp file and never
 displayed. The admin login is an **email, not a name**:
 `thomas.feyens@gmail.com` (the panel's login form takes it; the Caddy popup
 in front of it takes user `thomas`). Neither is secret — the address is already
 the ACME contact in `deploy/Caddyfile` — but both are also recorded in
-`.secrets/dogwalk-secrets.env` (`ADMIN_PANEL_EMAIL`, `CADDY_BASIC_AUTH_USER`)
+`.secrets/mikywalk-secrets.env` (`ADMIN_PANEL_EMAIL`, `CADDY_BASIC_AUTH_USER`)
 beside their passwords, so the panel is reachable without rediscovering them
 via `scripts/create_admin.py --list` on the box.
 
@@ -727,7 +727,7 @@ form.
 - `./gradlew :app:dependencies --write-locks` also writes
   `android/settings-gradle.lockfile` (version-catalog resolution only). It is
   gitignored; only `android/app/gradle.lockfile` is committed.
-- The NVD key in `.secrets/dogwalk-secrets.env` is no longer read by CI. It
+- The NVD key in `.secrets/mikywalk-secrets.env` is no longer read by CI. It
   can stay for a manual dependency-check run, but nothing uses it.
 
 ## Session log — 2026-11-15 (evening) — PR #13, vulnerability scanners
@@ -766,7 +766,7 @@ CI run `43743687642` is 3/3 green with the scan step skipped.
 
 ### The NVD key
 
-Added to `/c/Users/thoma/Downloads/.secrets/dogwalk-secrets.env` as
+Added to `/c/Users/thoma/Downloads/.secrets/mikywalk-secrets.env` as
 `NVD_API_KEY`. **Still needs to be added as a GitHub repo secret** — Settings →
 Secrets and variables → Actions → `NVD_API_KEY`. Until then the scan step stays
 skipped and the Android dependency gate is off.
@@ -809,9 +809,9 @@ AARs, so it is an awkward fit either way. Neither alternative needs an NVD key.
 
 - dependency-check's data directory is `~/.gradle/dependency-check-data/11.0`
   (343 MB after a full pull), **not** `~/.dependency-check`.
-- `NVD_API_KEY` lives in `/c/Users/thoma/Downloads/.secrets/dogwalk-secrets.env`.
+- `NVD_API_KEY` lives in `/c/Users/thoma/Downloads/.secrets/mikywalk-secrets.env`.
   Export it before a local scan:
-  `export NVD_API_KEY=$(grep '^NVD_API_KEY=' /c/Users/thoma/Downloads/.secrets/dogwalk-secrets.env | cut -d= -f2-)`
+  `export NVD_API_KEY=$(grep '^NVD_API_KEY=' /c/Users/thoma/Downloads/.secrets/mikywalk-secrets.env | cut -d= -f2-)`
 - `actionlint` is not installed on this machine. The 1.7.12 Windows binary was
   downloaded to `/tmp/al/actionlint.exe` for this session; re-download it or
   install it properly before trusting a workflow edit.
@@ -859,7 +859,7 @@ and deployed to the VPS. HEAD is `c2c3af6`, tree clean, no open PRs.
 - **No sshd hardening yet** — still developing, root password SSH stays enabled
   on the VPS.
 - Secrets live in `/c/Users/thoma/Downloads/.secrets` (`vps.sh` for SSH,
-  `dogwalk-secrets.env` for app secrets) — never print values into transcripts.
+  `mikywalk-secrets.env` for app secrets) — never print values into transcripts.
 - On the VPS, git must run as `thomas`:
   `su - thomas -c "cd ~/dog && git ..."`.
 
@@ -917,7 +917,7 @@ backend image did not change that day: every box-side change was the `.env`
 `deploy/verify.sh` passes 16/16 there **as root** — as `thomas` two checks
 fail on permissions, not on reality. The panel is
 `https://backend.thomasfeyens.be/admin/ui`: Caddy user `thomas`, then app
-login `thomas.feyens@gmail.com`, both passwords in `.secrets/dogwalk-secrets.env`.
+login `thomas.feyens@gmail.com`, both passwords in `.secrets/mikywalk-secrets.env`.
 See `deploy/VPS.md`.
 
 ## Resuming
@@ -971,12 +971,12 @@ Redis. The map tiles are unaffected either way: `assets/style.json` points at
 even when the backend is local.
 
 The emulator must be running first. If you recreate the AVD or run
-`adb shell pm clear com.dogwalk`, re-grant the permissions — clearing wipes them:
+`adb shell pm clear com.mikywalk`, re-grant the permissions — clearing wipes them:
 
 ```bash
-adb shell pm grant com.dogwalk android.permission.ACCESS_FINE_LOCATION
-adb shell pm grant com.dogwalk android.permission.ACCESS_COARSE_LOCATION
-adb shell pm grant com.dogwalk android.permission.POST_NOTIFICATIONS
+adb shell pm grant com.mikywalk android.permission.ACCESS_FINE_LOCATION
+adb shell pm grant com.mikywalk android.permission.ACCESS_COARSE_LOCATION
+adb shell pm grant com.mikywalk android.permission.POST_NOTIFICATIONS
 ```
 
 ## iOS port — where it stands
@@ -1030,13 +1030,13 @@ you find that claim anywhere, it is stale.
 
 | File | Role |
 | --- | --- |
-| `ios/DogWalk/Location/WalkLocationManager.swift` | The Core Location config that makes the strategy work. Read this first. |
-| `ios/DogWalk/Remote/WalkSocketClient.swift` | `URLSessionWebSocketTask`, 1 s → 30 s backoff, 4401 → refresh, 20 s ping. |
-| `ios/DogWalk/Remote/Protocol.swift` | Wire frames, field names unchanged from Android. |
-| `ios/DogWalk/Session/WalkSession.swift` | Orchestration, entry/exit alerting, session renewal. |
-| `ios/DogWalk/Notifications/ProximityNotifier.swift` | One sound per relationship, chosen per notification. |
-| `ios/DogWalk/Model/Models.swift` | `WalkerLocation`, `NearbyWalker`, `DogRelationship`, `MarkedDog`. |
-| `ios/DogWalk/Resources/Info.plist` | `UIBackgroundModes: location` and When-In-Use only. |
+| `ios/Mikywalk/Location/WalkLocationManager.swift` | The Core Location config that makes the strategy work. Read this first. |
+| `ios/Mikywalk/Remote/WalkSocketClient.swift` | `URLSessionWebSocketTask`, 1 s → 30 s backoff, 4401 → refresh, 20 s ping. |
+| `ios/Mikywalk/Remote/Protocol.swift` | Wire frames, field names unchanged from Android. |
+| `ios/Mikywalk/Session/WalkSession.swift` | Orchestration, entry/exit alerting, session renewal. |
+| `ios/Mikywalk/Notifications/ProximityNotifier.swift` | One sound per relationship, chosen per notification. |
+| `ios/Mikywalk/Model/Models.swift` | `WalkerLocation`, `NearbyWalker`, `DogRelationship`, `MarkedDog`. |
+| `ios/Mikywalk/Resources/Info.plist` | `UIBackgroundModes: location` and When-In-Use only. |
 
 912 lines of Swift. Not written: auth, map, settings, UI. `WalkSession` reaches
 them through the `WalkSessionEnvironment` protocol, so `AuthStore` and
@@ -1152,7 +1152,7 @@ Four things that will bite if changed carelessly:
 
 1. **Android fixes a channel's sound at creation.** Editing the sound on an
    existing channel id does nothing on a device that already created it. That is
-   why there are three proximity channels (`dogwalk_proximity`,
+   why there are three proximity channels (`mikywalk_proximity`,
    `_friend`, `_disliked`) rather than one. Adding a fourth relationship means a
    fourth channel id, not a new sound on an old one. **Changing a tone also needs
    `pm clear` or a reinstall** to recreate the channel — otherwise you will test
@@ -1216,7 +1216,7 @@ Three things worth not undoing:
 Verified on `emulator-5554` against the local stack: started a walk with
 `hold_walker.py --meters 60 --name Buddy`, moved the emulator 100 m mid-walk, stopped;
 the dialog showed `51 s · 96 m · 1 dog met · Buddy`, and the remove button emptied
-the list (`dogwalk_history.xml` → `[]`).
+the list (`mikywalk_history.xml` → `[]`).
 
 ## Blocking — the one social signal that is server-side
 
@@ -1356,18 +1356,18 @@ gate off; only do that once there is email verification to replace it.
 ### `JWT_SECRET` now fails hard
 
 `Settings.validate()` runs at `create_app` time and raises `RuntimeError` when the
-secret is still `DEV_JWT_SECRET` and `DOGWALK_ENV` is not a development
+secret is still `DEV_JWT_SECRET` and `MIKYWALK_ENV` is not a development
 environment, or when the secret is shorter than 32 bytes. A warning is not enough:
 a deployment that logs a warning and carries on is a deployment where anyone who
 has read this repository can mint a token for any account.
 
-`docker-compose.yml` sets `DOGWALK_ENV` and a real `JWT_SECRET`. If you see the
-`RuntimeError` on a dev box, set `DOGWALK_ENV=development`.
+`docker-compose.yml` sets `MIKYWALK_ENV` and a real `JWT_SECRET`. If you see the
+`RuntimeError` on a dev box, set `MIKYWALK_ENV=development`.
 
 ### Token storage is encrypted
 
 `SecurePrefs` encrypts each value with a Keystore-backed AES-GCM key
-(`AES/GCM/NoPadding`, 256-bit, alias `dogwalk_auth_key`) and stores `iv:ciphertext`
+(`AES/GCM/NoPadding`, 256-bit, alias `mikywalk_auth_key`) and stores `iv:ciphertext`
 base64. A value that fails to decrypt is dropped rather than crashing the app.
 `EncryptedSharedPreferences` was the obvious choice but is deprecated in
 `androidx.security`.
@@ -1380,7 +1380,7 @@ Verify it is actually encrypted:
 
 ```bash
 export MSYS_NO_PATHCONV=1
-adb shell run-as com.dogwalk cat /data/data/com.dogwalk/shared_prefs/dogwalk_auth.xml
+adb shell run-as com.mikywalk cat /data/data/com.mikywalk/shared_prefs/mikywalk_auth.xml
 ```
 
 Every value should read `iv:ciphertext` base64. If you can see a JWT or an email
@@ -1543,7 +1543,7 @@ Generate the keystore yourself — it is not in the repo and must not be:
 
 ```bash
 keytool -genkeypair -v -keystore release.jks -keyalg RSA -keysize 4096 \
-  -validity 10000 -alias dogwalk
+  -validity 10000 -alias mikywalk
 ```
 
 With the file present the release build produces `app-release.apk`, signed.
@@ -1664,10 +1664,10 @@ throwaway account derived from `--email`.
   Buddy` produced frames of the form
   `{"id": "…", "name": "Pickle", "distance_m": 50.0, "bearing_deg": 180.0}` — no
   coordinates. Buddy's marker rendered due north of Pickle, header read
-  `Live · 1 nearby`, and the notification fired on channel `dogwalk_proximity`
+  `Live · 1 nearby`, and the notification fired on channel `mikywalk_proximity`
   (id 2001) with `Buddy is nearby / Buddy is 50 m away`.
-- **Token storage is encrypted**: `run-as com.dogwalk cat
-  shared_prefs/dogwalk_auth.xml` shows all four values as `iv:ciphertext` base64.
+- **Token storage is encrypted**: `run-as com.mikywalk cat
+  shared_prefs/mikywalk_auth.xml` shows all four values as `iv:ciphertext` base64.
   No plaintext JWT or email address.
 - **Release manifest is clean**: `allowBackup="false"`,
   `fullBackupContent="false"`, zero occurrences of `usesCleartextTraffic` or
@@ -1694,19 +1694,19 @@ throwaway account derived from `--email`.
   `app-release-unsigned.apk`.
 - **Friend groups end to end**, on `emulator-5554` with
   `hold_walker.py --meters 60 --name Buddy`:
-  - unmarked → marker amber, notification on `dogwalk_proximity`;
+  - unmarked → marker amber, notification on `mikywalk_proximity`;
   - tapped Buddy's name tag → mark dialog → **Likes** → marker turned green
     (`#2E9E5B`, sampled from the screenshot at the same pixel bounds the amber
     marker had occupied) and the next arrival fired on
-    `dogwalk_proximity_friend` with `color=0xff2e9e5b`;
+    `mikywalk_proximity_friend` with `color=0xff2e9e5b`;
   - **Does not like** → marker red (`#C62828`, same bounds) and the next arrival
-    fired on `dogwalk_proximity_disliked` with `color=0xffc62828` and title
+    fired on `mikywalk_proximity_disliked` with `color=0xffc62828` and title
     `Watch out - Buddy is nearby`;
   - `dumpsys notification` shows the channels carry three different sounds:
-    `dogwalk_proximity` → `content://settings/system/notification_sound`,
-    `dogwalk_proximity_friend` → `android.resource://com.dogwalk/2131427330`
-    (`res/raw/friend_chime.wav`), `dogwalk_proximity_disliked` →
-    `android.resource://com.dogwalk/2131427329` (`res/raw/disliked_alarm.wav`),
+    `mikywalk_proximity` → `content://settings/system/notification_sound`,
+    `mikywalk_proximity_friend` → `android.resource://com.mikywalk/2131427330`
+    (`res/raw/friend_chime.wav`), `mikywalk_proximity_disliked` →
+    `android.resource://com.mikywalk/2131427329` (`res/raw/disliked_alarm.wav`),
     with vibration patterns `[0,80,90,80]` and `[0,400,120,400,120,400]`.
     Cross-check the ids against
     `app/build/intermediates/runtime_symbol_list/debug/processDebugResources/R.txt`
@@ -1714,8 +1714,8 @@ throwaway account derived from `--email`.
   - settings sheet listed Buddy under **Dogs yours does not like**; the remove
     button cleared it, `marked_dogs` went to `[]`, the empty-state hint appeared,
     the marker returned to amber and the next arrival fired on the neutral
-    `dogwalk_proximity` channel again.
-  - `marked_dogs` in `shared_prefs/dogwalk_settings.xml` round-trips as
+    `mikywalk_proximity` channel again.
+  - `marked_dogs` in `shared_prefs/mikywalk_settings.xml` round-trips as
     `[{"id":"…","name":"Buddy","relationship":"FRIEND"}]` and survives a restart.
     Nothing about it is sent to the server — the backend was not touched and
     `pytest -q` was still 71 passed at the time.
@@ -1723,7 +1723,7 @@ throwaway account derived from `--email`.
   distance**, on `emulator-5554` with a scratch script that moved one walker on a
   single socket (a disconnect would have sent `PROXIMITY_CLEAR` and exercised a
   different path). Holding at 60 m: notification `id=2001` present on
-  `dogwalk_proximity`, header `1 nearby`. Moved to 300 m — outside the 100 m
+  `mikywalk_proximity`, header `1 nearby`. Moved to 300 m — outside the 100 m
   warning distance but inside the 500 m server radius: notification gone, header
   still `1 nearby`, which is the proof the withdrawal came from the warning-distance
   path and not from the walker leaving the radius. Back to 60 m: notification
@@ -2064,7 +2064,7 @@ next person meets it as a passing test rather than a mystery failure.
   proof the marker moved or recoloured rather than a second marker appearing.
   Note `#E0A030` is both the unmarked marker and the warning ring, so filter by
   region when checking the amber case.
-- `adb shell pm clear com.dogwalk` resets the dog name to a new random one. If you
+- `adb shell pm clear com.mikywalk` resets the dog name to a new random one. If you
   clear app data during a test, set the name back to `Pickle` in settings before
   finishing, or the docs stop matching the device.
 

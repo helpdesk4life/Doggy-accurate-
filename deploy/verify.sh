@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 #
-# Verify a DogWalk VPS deployment, layer by layer.
+# Verify a Mikywalk VPS deployment, layer by layer.
 #
 #   sudo bash deploy/verify.sh
 #
@@ -63,12 +63,12 @@ section "Caddy config"
 
 if [ ! -r "$CADDYFILE" ]; then
 	fail "$CADDYFILE is missing or unreadable"
-elif caddy validate --config "$CADDYFILE" >/tmp/dogwalk-caddy-validate.log 2>&1; then
+elif caddy validate --config "$CADDYFILE" >/tmp/mikywalk-caddy-validate.log 2>&1; then
 	pass "$CADDYFILE validates"
 else
 	fail "$CADDYFILE does not validate"
-	note "the reason is in /tmp/dogwalk-caddy-validate.log:"
-	tail -5 /tmp/dogwalk-caddy-validate.log | sed 's/^/      /'
+	note "the reason is in /tmp/mikywalk-caddy-validate.log:"
+	tail -5 /tmp/mikywalk-caddy-validate.log | sed 's/^/      /'
 fi
 
 # --- 3. Caddy service ------------------------------------------------------

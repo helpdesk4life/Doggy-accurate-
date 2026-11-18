@@ -1,4 +1,4 @@
-# Roadmap — DogWalk
+# Roadmap — Mikywalk
 
 What to build next, in priority order. `HANDOFF.md` covers how to get the stack
 running and what is already verified; this file is the forward-looking half.
@@ -91,11 +91,11 @@ proximity feature. The quanta raise the cost; they do not remove it.
 
 ### 2. Tokens sat in plain `SharedPreferences` — done
 
-`dogwalk_auth` held a 30-day refresh token in cleartext, and `allowBackup="true"`
+`mikywalk_auth` held a 30-day refresh token in cleartext, and `allowBackup="true"`
 meant Android Auto Backup swept it into the user's Google account.
 
 `SecurePrefs` now encrypts each value with a Keystore-backed AES-GCM key
-(`AES/GCM/NoPadding`, 256-bit, alias `dogwalk_auth_key`) and stores `iv:ciphertext`
+(`AES/GCM/NoPadding`, 256-bit, alias `mikywalk_auth_key`) and stores `iv:ciphertext`
 base64. A value that fails to decrypt is dropped rather than crashing the app.
 `EncryptedSharedPreferences` was the obvious choice but is deprecated in
 `androidx.security`. Manifest now sets `allowBackup="false"` and
@@ -124,7 +124,7 @@ password again.
 ### 5. `JWT_SECRET` silently fell back to a known dev value — done
 
 `Settings.validate()` runs at `create_app` time and raises `RuntimeError` when the
-secret is still the built-in one and `DOGWALK_ENV` is not a development
+secret is still the built-in one and `MIKYWALK_ENV` is not a development
 environment, or when the secret is shorter than 32 bytes. A warning is not enough:
 a deployment that logs a warning and carries on is a deployment where anyone who
 has read this repository can mint a token for any account.
@@ -168,8 +168,8 @@ Consequences worth remembering:
   ordinal order would have been wrong.
 
 Verified on `emulator-5554` with `scripts/hold_walker.py --meters 60 --name Buddy`:
-amber → neutral channel, green → `dogwalk_proximity_friend`, red →
-`dogwalk_proximity_disliked` with `alarm_alert`, remove → back to amber and the
+amber → neutral channel, green → `mikywalk_proximity_friend`, red →
+`mikywalk_proximity_disliked` with `alarm_alert`, remove → back to amber and the
 neutral channel. Marker colours checked by sampling screenshot pixels, not by eye.
 
 ## P1.6 — admin backend, done

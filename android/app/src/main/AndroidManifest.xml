@@ -24,20 +24,20 @@
         name and a backend URL, which is not a trade worth making.
     -->
     <application
-        android:name=".DogWalkApp"
+        android:name=".MikywalkApp"
         android:allowBackup="false"
         android:fullBackupContent="false"
         android:icon="@mipmap/ic_launcher"
         android:label="@string/app_name"
         android:roundIcon="@mipmap/ic_launcher_round"
         android:supportsRtl="true"
-        android:theme="@style/Theme.DogWalk">
+        android:theme="@style/Theme.Mikywalk">
 
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:label="@string/app_name"
-            android:theme="@style/Theme.DogWalk">
+            android:theme="@style/Theme.Mikywalk">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />

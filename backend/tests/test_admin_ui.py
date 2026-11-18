@@ -101,7 +101,7 @@ def test_login_with_a_wrong_password_shows_the_error_and_sets_nothing(client, op
 
 def test_a_walker_token_in_the_cookie_is_not_an_admin_session(client, operator):
     session = register(client)
-    client.cookies.set("dogwalk_admin", session["access_token"])
+    client.cookies.set("mikywalk_admin", session["access_token"])
 
     response = client.get("/admin/ui", follow_redirects=False)
 
@@ -401,12 +401,12 @@ def test_changing_the_password_keeps_this_browser_signed_in(client, operator):
 
 def test_changing_the_password_signs_out_another_browser(client, operator):
     sign_in(client)
-    other_browser = client.cookies.get("dogwalk_admin")
+    other_browser = client.cookies.get("mikywalk_admin")
 
     change_password(client, ADMIN_PASSWORD, "a-brand-new-password")
 
     client.cookies.clear()
-    client.cookies.set("dogwalk_admin", other_browser)
+    client.cookies.set("mikywalk_admin", other_browser)
     response = client.get("/admin/ui", follow_redirects=False)
 
     assert response.status_code == 303

@@ -63,7 +63,7 @@ RESET_MAX_ATTEMPTS = 10
 
 # Verified against when the address has no account, so that "no such user" and
 # "wrong password" cost the same amount of time. Computed once at import.
-_DUMMY_PASSWORD_HASH = auth.hash_password("dogwalk-dummy-password-not-a-real-account")
+_DUMMY_PASSWORD_HASH = auth.hash_password("mikywalk-dummy-password-not-a-real-account")
 
 
 class EmailTaken(Exception):

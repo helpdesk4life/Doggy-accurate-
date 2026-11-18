@@ -140,7 +140,7 @@ def create_app(
                     with contextlib.suppress(Exception):
                         await geo_closer()
 
-    app = FastAPI(title="DogWalk proximity backend", lifespan=lifespan)
+    app = FastAPI(title="Mikywalk proximity backend", lifespan=lifespan)
     app.include_router(auth_router)
     app.include_router(admin_router)
     app.include_router(admin_ui_router)
@@ -188,7 +188,7 @@ def create_app(
     if config.settings.jwt_secret_is_default:
         logger.warning(
             "JWT_SECRET is unset; using the built-in development secret. "
-            "Anyone can mint tokens. This is only allowed because DOGWALK_ENV is "
+            "Anyone can mint tokens. This is only allowed because MIKYWALK_ENV is "
             "%r; set JWT_SECRET before exposing this.",
             config.settings.environment,
         )

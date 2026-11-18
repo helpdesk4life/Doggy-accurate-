@@ -648,7 +648,7 @@ async def test_smtp(
     try:
         await sender.send(
             to=body.to,
-            subject="DogWalk SMTP test",
+            subject="Mikywalk SMTP test",
             body=email.test_email_body(candidate.host),
         )
     except Exception as error:

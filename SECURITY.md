@@ -1,13 +1,13 @@
 # Security Policy
 
-DogWalk is a dog-walking app that tells walkers when another walker comes within
+Mikywalk is a dog-walking app that tells walkers when another walker comes within
 a configurable distance: an Android app (`android/`), a FastAPI + WebSocket
 backend with an admin panel (`backend/`), an iOS port in progress (`ios/`), and
 the deployment config for the production VPS (`deploy/`).
 
 ## Supported Versions
 
-DogWalk has no versioned releases; it is deployed from source. Only the latest
+Mikywalk has no versioned releases; it is deployed from source. Only the latest
 commit on `main` receives security fixes.
 
 | Version        | Supported          |
@@ -73,7 +73,7 @@ Do not report these — they are deliberate and already gated:
 - The built-in development `JWT_SECRET` in `backend/app/config.py`. It is
   public on purpose so an unconfigured deployment is easy to spot, and the
   backend **refuses to boot in production** with it (verified:
-  `DOGWALK_ENV=production` raises at startup).
+  `MIKYWALK_ENV=production` raises at startup).
 - `EMAIL_SENDER=logging` in development, which writes password-reset codes to
   the log. Also refused in production unless explicitly acknowledged.
 - The debug-only network security config that trusts the local Caddy CA

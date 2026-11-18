@@ -49,7 +49,7 @@ def sender(**overrides) -> email.SmtpEmailSender:
     options = {
         "host": "smtp.example.com",
         "port": 587,
-        "sender": "DogWalk <no-reply@example.com>",
+        "sender": "Mikywalk <no-reply@example.com>",
         "username": "apikey",
         "password": "s3cret",
     }
@@ -96,7 +96,7 @@ def test_the_message_carries_the_headers_a_provider_needs(smtp):
     send(sender())
 
     message = smtp[0].calls[2][1]
-    assert message["From"] == "DogWalk <no-reply@example.com>"
+    assert message["From"] == "Mikywalk <no-reply@example.com>"
     assert message["To"] == "alice@example.com"
     assert message["Subject"] == "Your code"
     assert "123456" in message.get_content()

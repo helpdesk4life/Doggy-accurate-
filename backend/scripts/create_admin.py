@@ -73,7 +73,7 @@ async def backfill(client) -> int:
 
 
 async def main() -> int:
-    parser = argparse.ArgumentParser(description="Create a DogWalk admin account.")
+    parser = argparse.ArgumentParser(description="Create a Mikywalk admin account.")
     parser.add_argument("--email", help="admin email")
     parser.add_argument(
         "--password",

@@ -5,9 +5,9 @@
 # kotlinx.serialization generated serializers.
 -keepattributes *Annotation*, InnerClasses
 -dontnote kotlinx.serialization.**
--keepclassmembers class com.dogwalk.** {
+-keepclassmembers class com.mikywalk.** {
     *** Companion;
 }
--keepclasseswithmembers class com.dogwalk.** {
+-keepclasseswithmembers class com.mikywalk.** {
     kotlinx.serialization.KSerializer serializer(...);
 }

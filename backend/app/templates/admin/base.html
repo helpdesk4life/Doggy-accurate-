@@ -3,7 +3,7 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{% block title %}DogWalk admin{% endblock %}</title>
+  <title>{% block title %}Mikywalk admin{% endblock %}</title>
   <style>
     :root {
       color-scheme: light dark;
@@ -102,7 +102,7 @@
 <body>
 {% if admin %}
 <header>
-  <span class="brand">DogWalk admin</span>
+  <span class="brand">Mikywalk admin</span>
   <nav>
     <a href="/admin/ui" class="{{ 'active' if page == 'dashboard' else '' }}">Overview</a>
     <a href="/admin/ui/users" class="{{ 'active' if page == 'users' else '' }}">Accounts</a>

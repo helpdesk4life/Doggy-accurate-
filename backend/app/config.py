@@ -22,7 +22,11 @@ class Settings:
 
     # Which deployment this is. Anything outside DEVELOPMENT_ENVIRONMENTS is
     # treated as production and gets the strict startup checks.
-    environment: str = os.getenv("DOGWALK_ENV", "development")
+    # MIKYWALK_ENV since the 2026-11-18 rebrand to Mikywalk; the old DOGWALK_ENV
+    # name is still honoured so an existing .env keeps booting unchanged.
+    environment: str = os.getenv(
+        "MIKYWALK_ENV", os.getenv("DOGWALK_ENV", "development")
+    )
 
     redis_url: str = os.getenv("REDIS_URL", "redis://localhost:6379/0")
     # A separate Redis for the disposable geo index. Empty means "same instance
@@ -115,10 +119,10 @@ class Settings:
         """
         if self.jwt_secret_is_default and not self.is_development:
             raise RuntimeError(
-                "JWT_SECRET is unset and DOGWALK_ENV is "
+                "JWT_SECRET is unset and MIKYWALK_ENV is "
                 f"{self.environment!r}. The built-in development secret is public, "
                 "so every token would be forgeable. Set JWT_SECRET to at least "
-                f"{MIN_JWT_SECRET_BYTES} random bytes, or set DOGWALK_ENV=development "
+                f"{MIN_JWT_SECRET_BYTES} random bytes, or set MIKYWALK_ENV=development "
                 "if this really is a development machine."
             )
 
@@ -138,7 +142,7 @@ class Settings:
                 ("https://localhost", "https://127.0.0.1", "https://[::1]")
             ):
                 raise RuntimeError(
-                    f"PUBLIC_BASE_URL is {self.public_base_url!r} and DOGWALK_ENV is "
+                    f"PUBLIC_BASE_URL is {self.public_base_url!r} and MIKYWALK_ENV is "
                     f"{self.environment!r}. Reset links are built from it, so outside "
                     "development it must be the https URL this deployment is actually "
                     "served on, e.g. https://backend.example.com."
@@ -158,7 +162,7 @@ class Settings:
         ):
             raise RuntimeError(
                 "EMAIL_SENDER is 'logging', which writes password-reset codes to "
-                f"the backend log, and DOGWALK_ENV is {self.environment!r}. Anyone "
+                f"the backend log, and MIKYWALK_ENV is {self.environment!r}. Anyone "
                 "who can read that log can reset any account, so this is refused "
                 "rather than warned about. Implement a real sender in "
                 "app/email.py and set EMAIL_SENDER to it, or set "
