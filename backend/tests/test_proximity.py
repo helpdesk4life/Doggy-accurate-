@@ -137,7 +137,14 @@ def test_disconnect_clears_the_watcher(client):
             bob.receive_json()
             alice.receive_json()
 
-        assert alice.receive_json()["type"] == "PROXIMITY_CLEAR"
+            # Close Bob's socket without leaving the context: ``__exit__`` cancels
+            # the server task straight after sending the disconnect, which kills
+            # the cleanup that sends this frame and turns the assertion into a
+            # coin flip. ``close()`` only sends the disconnect, so the handler
+            # runs to completion.
+            bob.close()
+
+            assert alice.receive_json()["type"] == "PROXIMITY_CLEAR"
 
 
 def test_invalid_frame_is_rejected_without_dropping_the_socket(client):
