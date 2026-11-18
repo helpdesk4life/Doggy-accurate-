@@ -32,6 +32,12 @@ partial="$BACKUP_DIR/redis-$stamp.rdb"
 
 mkdir -p "$BACKUP_DIR"
 
+# find chdirs back to the directory it started in before exiting, and fails if
+# that directory is unreadable. Under `sudo -u thomas` from a root shell the
+# inherited cwd is /root, so the prune step would exit 1 and report a failed
+# backup that had in fact succeeded. Start somewhere the script owns.
+cd "$BACKUP_DIR"
+
 # BGSAVE forks and returns immediately, so the wait below is not optional.
 docker exec "$CONTAINER" redis-cli BGSAVE > /dev/null
 
