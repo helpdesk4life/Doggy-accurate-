@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 import redis.asyncio as aioredis
 from fastapi import FastAPI, Request
 
-from app import config, email, geo, ratelimit
+from app import config, email, geo, migrations, ratelimit
 from app.hub import Hub
 from app.proximity import refresh_neighborhood
 from app.admin_ui import router as admin_ui_router
@@ -113,6 +113,14 @@ def create_app(
             )
         else:
             app.state.geo_redis = app.state.redis
+        # A key's type is part of its schema, and Redis raises WRONGTYPE rather
+        # than converting, so a database that predates the 2026-11-17 type
+        # changes would answer 500 to registration. Repair before serving.
+        repaired = await migrations.migrate_legacy_types(
+            app.state.redis, app.state.geo_redis
+        )
+        if repaired:
+            logger.info("converted legacy key types: %s", ", ".join(repaired))
         app.state.hub = Hub()
         # Reads the admin panel's saved configuration, so a provider set up there
         # survives a restart. Falls back to EMAIL_SENDER when nothing is saved.
