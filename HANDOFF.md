@@ -174,6 +174,24 @@ expired" while the same checks passed on the box: the Windows Python CA store
 does not have the current Let's Encrypt chain (`YE2` / `Root YE`). The certificate
 is valid to 2027-02-12. Worth knowing before trusting a laptop's verdict on TLS.
 
+### Deployed
+
+`/etc/cron.d/mikywalk-watchdog` (`*/5`, as `thomas`, log to
+`/home/thomas/monitoring/watchdog.log`) and `/etc/default/mikywalk-watchdog`
+(settings, no secrets — the SMTP password is read from `backend/.env`). The
+script reads that defaults file itself, so a manual run and a cron run behave
+the same; cron does not source it, and a monitor that only works by hand is not
+a monitor.
+
+Proven from cron, not just by hand: a temporary every-minute entry with
+`DISK_MAX_PCT=1` sent one alert at 09:17 and then stayed silent at 09:18 and
+09:19, which is the anti-spam rule working in cron's own environment. The probe
+was removed and the real entry has run since — 09:20:01, nine checks, nothing to
+send, state written.
+
+**Still to do by hand:** set `HEARTBEAT_URL` in `/etc/default/mikywalk-watchdog`.
+Until then a dead machine is silent, and every log line says so.
+
 ## Session log — 2026-11-18 — backups, and the `.env` files one `git add` away
 
 Two gaps from the "what else should I do" list, both closed. Neither touches the
